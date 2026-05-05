@@ -1,236 +1,313 @@
-import { useState, useEffect } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useState, useRef, useEffect } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import useDocStore from '../store/docStore';
 
-// Note: Ensure your server.js uses app.use('/api/ai', aiRoutes)
-const API = 'http://localhost:5000/api/ai'; 
+const API_BASE = (typeof process !== 'undefined' ? process.env.REACT_APP_API_URL : null) ||
+  (typeof import.meta !== 'undefined' && import.meta.env ? import.meta.env.VITE_API_URL : null) ||
+  'http://localhost:5000/api';
+const API = `${API_BASE}/ai`;
 
 const FEATURES = [
-  { id: 'summarize', label: 'Summarize', icon: '📝', desc: 'Get key points instantly', color: 'blue' },
-  { id: 'entities', label: 'Extract Entities', icon: '🔍', desc: 'Find names, dates, orgs', color: 'purple' },
-  { id: 'detect-type', label: 'Detect Type', icon: '🏷️', desc: 'Identify document category', color: 'green' },
-  { id: 'translate', label: 'Translate', icon: '🌐', desc: 'Convert to any language', color: 'yellow' },
-  { id: 'chat', label: 'Chat with Doc', icon: '💬', desc: 'Ask anything about it', color: 'indigo' },
-  { id: 'fraud', label: 'Fraud Detection', icon: '🛡️', desc: 'Check for tampering', color: 'red' },
+  {
+    id: 'summarize',
+    label: 'Summarize',
+    icon: 'S',
+    desc: 'Generate a concise summary of the selected document',
+    color: 'text-indigo-400',
+    bg: 'bg-indigo-500/10 border-indigo-500/50',
+    glow: 'shadow-[0_0_15px_rgba(99,102,241,0.3)]',
+  },
+  {
+    id: 'chat',
+    label: 'Chat',
+    icon: 'C',
+    desc: 'Ask grounded questions using only document context',
+    color: 'text-pink-400',
+    bg: 'bg-pink-500/10 border-pink-500/50',
+    glow: 'shadow-[0_0_15px_rgba(236,72,153,0.3)]',
+  },
 ];
 
-const COLORS = {
-  blue: 'bg-blue-50 text-blue-700 border-blue-200',
-  purple: 'bg-purple-50 text-purple-700 border-purple-200',
-  green: 'bg-green-50 text-green-700 border-green-200',
-  yellow: 'bg-yellow-50 text-yellow-700 border-yellow-200',
-  indigo: 'bg-indigo-50 text-indigo-700 border-indigo-200',
-  red: 'bg-red-50 text-red-700 border-red-200',
-};
-
 export default function AIFeatures() {
+  const { state } = useLocation();
   const navigate = useNavigate();
-  const location = useLocation();
   const { documents, fetchDocuments } = useDocStore();
-  const [selectedDoc, setSelectedDoc] = useState(location.state?.doc || null);
-  const [activeFeature, setActiveFeature] = useState(null);
-  const [result, setResult] = useState(null);
+  const [selectedDoc, setSelectedDoc] = useState(state?.doc || null);
+  const [activeFeature, setActiveFeature] = useState('summarize');
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
+  const [result, setResult] = useState('');
+  const [chatHistory, setChatHistory] = useState([
+    { role: 'assistant', text: 'Ask a question about the selected document and I will answer using only its contents.' },
+  ]);
   const [chatInput, setChatInput] = useState('');
-  const [chatHistory, setChatHistory] = useState([]);
-  const [translateLang, setTranslateLang] = useState('Spanish');
-  const [showDocPicker, setShowDocPicker] = useState(false);
+  const chatEndRef = useRef(null);
 
-  useEffect(() => { fetchDocuments(); }, []);
+  useEffect(() => {
+    if (!documents.length) {
+      fetchDocuments();
+    }
+  }, [documents.length, fetchDocuments]);
 
-  const runFeature = async (featureId) => {
-    if (!selectedDoc) { setError('Please select a document first'); return; }
-    
-    // Check for chat input before starting
-    if (featureId === 'chat' && !chatInput.trim()) return;
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [chatHistory]);
 
-    setActiveFeature(featureId);
+  useEffect(() => {
+    setResult('');
+  }, [activeFeature, selectedDoc]);
+
+  const getAuthHeaders = () => ({
+    headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+  });
+
+  const handleSummarize = async () => {
+    if (!selectedDoc || loading) {
+      return;
+    }
+
     setLoading(true);
-    setError(null);
-    setResult(null);
+    setResult('');
 
     try {
-      let res;
-      // Headers for authentication
-      const config = {
-        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
-      };
-
-      if (featureId === 'chat') {
-        res = await axios.post(`${API}/${selectedDoc._id}/chat`, { question: chatInput }, config);
-        setChatHistory(h => [...h, { q: chatInput, a: res.data.answer }]);
-        setChatInput('');
-      } else if (featureId === 'translate') {
-        res = await axios.post(`${API}/${selectedDoc._id}/translate`, { targetLanguage: translateLang }, config);
-        setResult(res.data);
-      } else if (featureId === 'fraud') {
-        // Match the route name in your ai.js
-        res = await axios.post(`${API}/${selectedDoc._id}/fraud`, {}, config);
-        setResult(res.data);
-      } else if (featureId === 'detect-type') {
-        res = await axios.post(`${API}/${selectedDoc._id}/detect-type`, {}, config);
-        setResult(res.data);
-      } else {
-        // summarize and entities
-        res = await axios.post(`${API}/${selectedDoc._id}/${featureId}`, {}, config);
-        setResult(res.data);
-      }
-    } catch (err) {
-      console.error("Feature Error:", err.response?.data);
-      setError(err.response?.data?.message || err.response?.data?.error || 'AI Feature failed. Check backend logs.');
+      const res = await axios.post(`${API}/${selectedDoc._id}/summarize`, {}, getAuthHeaders());
+      const summary = res.data.summary || res.data.data?.summary || res.data.data?.summary?.summary || 'No summary available.';
+      setResult(summary);
+    } catch (error) {
+      setResult(`Error: ${error.response?.data?.message || error.message}`);
     } finally {
       setLoading(false);
     }
   };
 
-  const formatResult = (data) => {
-    if (!data) return '';
-    if (data.summary) return data.summary;
-    if (data.translation) return `Translated to ${data.targetLanguage}:\n\n${data.translation}`;
-    if (data.detection) return data.detection;
-    if (data.fraudAnalysis) return data.fraudAnalysis;
-    if (data.entities) return typeof data.entities === 'string' ? data.entities : JSON.stringify(data.entities, null, 2);
-    return JSON.stringify(data, null, 2);
+  const handleDownloadSummary = async () => {
+    if (!selectedDoc) {
+      return;
+    }
+
+    try {
+      const response = await axios.get(`${API}/${selectedDoc._id}/summary/download`, {
+        ...getAuthHeaders(),
+        responseType: 'blob',
+      });
+
+      const blobUrl = window.URL.createObjectURL(new Blob([response.data], { type: 'text/plain' }));
+      const link = document.createElement('a');
+      const baseName = (selectedDoc.originalName || 'document').replace(/\.[^.]+$/, '');
+
+      link.href = blobUrl;
+      link.download = `${baseName}_summary.txt`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(blobUrl);
+    } catch (error) {
+      setResult(`Error: ${error.response?.data?.message || error.message}`);
+    }
   };
 
+  const handleChat = async (event) => {
+    event.preventDefault();
+    if (!chatInput.trim() || !selectedDoc || loading) {
+      return;
+    }
+
+    const question = chatInput.trim();
+    setChatInput('');
+    setChatHistory((prev) => [...prev, { role: 'user', text: question }]);
+    setLoading(true);
+
+    try {
+      const res = await axios.post(
+        `${API}/${selectedDoc._id}/chat`,
+        { question },
+        getAuthHeaders()
+      );
+
+      const answer = res.data.answer || res.data.data?.answer || 'Not found in document';
+      const source = res.data.source || res.data.data?.source;
+      const chunkIndex = res.data.chunkIndex ?? res.data.data?.chunkIndex;
+      setChatHistory((prev) => [
+        ...prev,
+        {
+          role: 'assistant',
+          text: answer,
+          source,
+          chunkIndex,
+        },
+      ]);
+    } catch (error) {
+      setChatHistory((prev) => [
+        ...prev,
+        { role: 'assistant', text: `Error: ${error.response?.data?.message || error.message}` },
+      ]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const active = FEATURES.find((feature) => feature.id === activeFeature);
+
   return (
-    <div className="min-h-screen bg-gray-50">
-      <div className="bg-white border-b px-6 py-4 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <button onClick={() => navigate('/dashboard')} className="text-gray-400 hover:text-gray-600 transition">← Back</button>
+    <div className="min-h-screen bg-slate-950 text-slate-300 flex font-sans">
+      <div className="w-80 glass-panel border-r border-slate-800 flex flex-col relative z-20">
+        <div className="p-6 border-b border-slate-800 flex items-center justify-between">
           <div>
-            <h1 className="text-xl font-bold text-gray-900">AI Features</h1>
-            <p className="text-xs text-gray-400">Powered by Google Gemini</p>
+            <h2 className="font-bold text-white text-lg tracking-tight hover:text-cyan-400 transition-colors cursor-pointer" onClick={() => navigate('/dashboard')}>DocFlow</h2>
+            <p className="text-xs text-cyan-400 mt-1 flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse"></span>
+              AI Assistant
+            </p>
+          </div>
+          <button onClick={() => navigate('/documents')} className="w-8 h-8 rounded-lg bg-slate-800/50 hover:bg-slate-700 flex items-center justify-center text-slate-400 transition-colors">D</button>
+        </div>
+
+        <div className="p-5 flex-1 overflow-y-auto">
+          <div className="mb-6">
+            <label className="block text-xs font-bold text-slate-500 mb-2 tracking-wide uppercase">Select Document</label>
+            <select
+              value={selectedDoc?._id || ''}
+              onChange={(e) => setSelectedDoc(documents.find((doc) => doc._id === e.target.value))}
+              className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2.5 text-sm text-white focus:border-cyan-500 outline-none appearance-none font-mono"
+            >
+              <option value="">Choose a document...</option>
+              {documents.map((doc) => (
+                <option key={doc._id} value={doc._id}>{doc.originalName || doc.filename}</option>
+              ))}
+            </select>
+          </div>
+
+          <div className="space-y-2">
+            <label className="block text-xs font-bold text-slate-500 mb-2 tracking-wide uppercase">Features</label>
+            {FEATURES.map((feature) => (
+              <button
+                key={feature.id}
+                onClick={() => setActiveFeature(feature.id)}
+                className={`w-full flex items-center gap-3 p-3 rounded-xl border transition-all text-left group ${
+                  activeFeature === feature.id
+                    ? `${feature.bg} ${feature.color} ${feature.glow}`
+                    : 'border-transparent hover:bg-slate-800 hover:border-slate-700 text-slate-400'
+                }`}
+              >
+                <span className="text-xl group-hover:scale-110 transition-transform">{feature.icon}</span>
+                <div>
+                  <div className="font-bold text-sm">{feature.label}</div>
+                  <div className="text-xs opacity-80">{feature.desc}</div>
+                </div>
+              </button>
+            ))}
           </div>
         </div>
       </div>
 
-      <div className="max-w-5xl mx-auto p-6 space-y-6">
-        {/* Document Selector */}
-        <div className="bg-white rounded-2xl border shadow-sm p-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              {selectedDoc ? (
-                <>
-                  <div className="w-10 h-10 bg-blue-50 rounded-xl flex items-center justify-center text-xl">📄</div>
-                  <div>
-                    <p className="font-semibold text-gray-900 text-sm">{selectedDoc.originalName || selectedDoc.filename}</p>
-                    <p className="text-xs text-gray-400">Selected document</p>
-                  </div>
-                </>
-              ) : (
-                <>
-                  <div className="w-10 h-10 bg-gray-100 rounded-xl flex items-center justify-center text-xl">📂</div>
-                  <div>
-                    <p className="font-semibold text-gray-600 text-sm">No document selected</p>
-                    <p className="text-xs text-gray-400">Pick a document to use AI features</p>
-                  </div>
-                </>
-              )}
-            </div>
-            <button onClick={() => setShowDocPicker(!showDocPicker)}
-              className="bg-blue-600 text-white px-4 py-2 rounded-xl text-sm font-medium hover:bg-blue-700 transition">
-              {selectedDoc ? 'Change' : 'Select Document'}
-            </button>
-          </div>
+      <div className="flex-1 p-8 bg-slate-950 relative overflow-hidden flex flex-col">
+        <div className={`absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] rounded-full blur-[120px] pointer-events-none transition-colors duration-1000 ${
+          activeFeature === 'chat' ? 'bg-pink-500/5' : 'bg-indigo-500/5'
+        }`} />
 
-          {showDocPicker && (
-            <div className="mt-4 border-t pt-4 space-y-2 max-h-48 overflow-y-auto">
-              {documents.length === 0 ? (
-                <div className="text-center py-4 text-gray-400 text-sm">
-                  No documents yet. <button onClick={() => navigate('/upload')} className="text-blue-600 hover:underline">Upload one</button>
+        {!selectedDoc ? (
+          <div className="flex-1 flex flex-col items-center justify-center text-slate-500 relative z-10">
+            <div className="text-6xl mb-4 drop-shadow-[0_0_15px_rgba(100,116,139,0.3)]">D</div>
+            <p className="text-lg">No document selected</p>
+            <p className="text-sm mt-2 opacity-70">Select a document from the sidebar to begin</p>
+          </div>
+        ) : (
+          <div className="flex-1 flex flex-col max-w-4xl mx-auto w-full relative z-10 glass-panel border border-slate-800 rounded-3xl overflow-hidden shadow-2xl">
+            <div className="bg-slate-900/80 px-6 py-4 border-b border-slate-800 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center text-lg">{active?.icon}</div>
+                <div>
+                  <h3 className="font-bold text-white">{activeFeature === 'chat' ? 'Chat with Document' : 'Summarize Document'}</h3>
+                  <p className="text-sm text-slate-500">File: <span className="text-cyan-400">{selectedDoc.originalName}</span></p>
                 </div>
-              ) : (
-                documents.map(doc => (
-                  <button key={doc._id} onClick={() => { setSelectedDoc(doc); setShowDocPicker(false); setResult(null); setChatHistory([]); }}
-                    className={`w-full flex items-center gap-3 p-3 rounded-xl text-left transition hover:bg-gray-50 ${selectedDoc?._id === doc._id ? 'bg-blue-50 border border-blue-200' : ''}`}>
-                    <span className="text-lg">📄</span>
-                    <div>
-                      <p className="text-sm font-medium text-gray-800">{doc.originalName || doc.filename}</p>
-                      <p className="text-xs text-gray-400">{new Date(doc.createdAt).toLocaleDateString()}</p>
+              </div>
+            </div>
+
+            {activeFeature === 'chat' ? (
+              <>
+                <div className="flex-1 overflow-y-auto p-6 space-y-6">
+                  {chatHistory.map((message, index) => (
+                    <div key={index} className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                      <div className={`max-w-[80%] rounded-2xl px-5 py-4 ${
+                        message.role === 'user'
+                          ? 'bg-gradient-to-br from-indigo-600 to-indigo-800 text-white rounded-br-sm shadow-lg shadow-indigo-500/20'
+                          : 'bg-slate-900 border border-slate-700 text-slate-300 rounded-bl-sm font-sans leading-relaxed'
+                      }`}>
+                        <div className="whitespace-pre-wrap">{message.text}</div>
+                        {message.role === 'assistant' && typeof message.chunkIndex === 'number' && (
+                          <div className="mt-3 text-xs font-semibold uppercase tracking-wide text-cyan-400">
+                            Answer from section {message.chunkIndex}
+                          </div>
+                        )}
+                        {message.role === 'assistant' && message.source && (
+                          <div className="mt-2 text-xs text-slate-500">Source: {message.source}</div>
+                        )}
+                      </div>
                     </div>
-                  </button>
-                ))
-              )}
-            </div>
-          )}
-        </div>
-
-        {/* Feature Cards */}
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-          {FEATURES.map(f => (
-            <div key={f.id} className={`bg-white rounded-2xl border-2 p-5 hover:shadow-md transition ${activeFeature === f.id ? 'border-blue-400 shadow-md' : 'border-gray-100'}`}>
-              <div className="text-3xl mb-2">{f.icon}</div>
-              <h3 className="font-bold text-gray-800 text-sm">{f.label}</h3>
-              <p className="text-xs text-gray-400 mt-1 mb-3">{f.desc}</p>
-
-              {f.id === 'translate' && (
-                <select value={translateLang} onChange={(e) => setTranslateLang(e.target.value)}
-                  className="w-full border rounded-lg px-2 py-1.5 text-xs mb-2 outline-none focus:ring-1 focus:ring-blue-500">
-                  {['Spanish','French','German','Hindi','Japanese','Chinese','Arabic','Portuguese','Italian','Korean'].map(l => (
-                    <option key={l} value={l}>{l}</option>
                   ))}
-                </select>
-              )}
-
-              {f.id === 'chat' && (
-                <input value={chatInput} onChange={(e) => setChatInput(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && runFeature('chat')}
-                  placeholder="Type your question..."
-                  className="w-full border rounded-lg px-2 py-1.5 text-xs mb-2 outline-none focus:ring-1 focus:ring-blue-500" />
-              )}
-
-              <button onClick={() => runFeature(f.id)}
-                disabled={loading}
-                className={`w-full py-2 rounded-xl text-xs font-bold transition border ${COLORS[f.color]} hover:opacity-80 disabled:opacity-40`}>
-                {loading && activeFeature === f.id ? '⏳ Processing...' : `Run ${f.label}`}
-              </button>
-            </div>
-          ))}
-        </div>
-
-        {/* Error Display */}
-        {error && (
-          <div className="bg-red-50 border border-red-200 text-red-700 rounded-2xl p-4 flex justify-between items-center">
-            <span className="text-sm">{error}</span>
-            <button onClick={() => setError(null)} className="font-bold text-lg">×</button>
-          </div>
-        )}
-
-        {/* Chat History */}
-        {chatHistory.length > 0 && (
-          <div className="bg-white rounded-2xl border shadow-sm overflow-hidden">
-            <div className="px-6 py-4 border-b flex justify-between items-center">
-              <h2 className="font-bold text-gray-800">💬 Chat History</h2>
-              <button onClick={() => setChatHistory([])} className="text-xs text-gray-400 hover:text-red-500">Clear</button>
-            </div>
-            <div className="p-6 space-y-4 max-h-80 overflow-y-auto">
-              {chatHistory.map((item, i) => (
-                <div key={i} className="space-y-2">
-                  <div className="flex justify-end">
-                    <div className="bg-blue-600 text-white px-4 py-2 rounded-2xl rounded-br-sm text-sm max-w-md">{item.q}</div>
-                  </div>
-                  <div className="flex justify-start">
-                    <div className="bg-gray-100 text-gray-800 px-4 py-2 rounded-2xl rounded-bl-sm text-sm max-w-md">{item.a}</div>
-                  </div>
+                  {loading && (
+                    <div className="flex justify-start">
+                      <div className="bg-slate-900 border border-slate-700 rounded-2xl rounded-bl-sm px-5 py-4 flex gap-2">
+                        <span className="w-2 h-2 rounded-full bg-cyan-500 animate-pulse" />
+                        <span className="w-2 h-2 rounded-full bg-cyan-500 animate-pulse delay-75" />
+                        <span className="w-2 h-2 rounded-full bg-cyan-500 animate-pulse delay-150" />
+                      </div>
+                    </div>
+                  )}
+                  <div ref={chatEndRef} />
                 </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Result Display */}
-        {result && (
-          <div className="bg-white rounded-2xl border shadow-sm p-6">
-            <div className="flex justify-between items-center mb-4">
-              <h2 className="font-bold text-gray-800">✨ Result</h2>
-              <button onClick={() => setResult(null)} className="text-xs text-gray-400 hover:text-red-500">Clear</button>
-            </div>
-            <pre className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed bg-gray-50 rounded-xl p-4 font-sans">
-              {formatResult(result)}
-            </pre>
+                <form onSubmit={handleChat} className="p-4 border-t border-slate-800 bg-slate-950/50 flex gap-3">
+                  <input
+                    value={chatInput}
+                    onChange={(e) => setChatInput(e.target.value)}
+                    placeholder="Ask a question..."
+                    className="flex-1 bg-slate-900 border border-slate-700 rounded-xl px-5 py-3.5 outline-none focus:border-pink-500 focus:ring-1 focus:ring-pink-500 transition text-white placeholder-slate-600 font-sans"
+                    disabled={loading}
+                  />
+                  <button
+                    type="submit"
+                    disabled={loading || !chatInput.trim()}
+                    className="bg-pink-600 hover:bg-pink-500 disabled:bg-slate-800 text-white font-bold px-6 rounded-xl transition-all shadow-[0_0_15px_rgba(236,72,153,0.2)] disabled:shadow-none"
+                  >
+                    Send
+                  </button>
+                </form>
+              </>
+            ) : (
+              <div className="flex-1 p-6 flex flex-col">
+                {result ? (
+                  <div className="flex-1 flex flex-col gap-4">
+                    <div className="flex items-center justify-end">
+                      <button
+                        onClick={handleDownloadSummary}
+                        className="px-4 py-2 rounded-xl border border-cyan-500/30 bg-cyan-500/10 text-cyan-300 hover:bg-cyan-500/20 transition-all text-sm font-semibold"
+                      >
+                        Download Summary
+                      </button>
+                    </div>
+                    <div className="flex-1 bg-slate-950/50 rounded-xl border border-slate-800 p-6 overflow-y-auto whitespace-pre-wrap font-sans text-slate-300 leading-relaxed shadow-inner">
+                      {result}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex-1 flex flex-col items-center justify-center border-2 border-dashed border-slate-800 rounded-xl bg-slate-900/30">
+                    <div className={`text-6xl mb-6 opacity-80 ${active?.color}`}>{active?.icon}</div>
+                    <p className="text-slate-500 mb-6 text-sm">Click below to generate a document summary</p>
+                    <button
+                      onClick={handleSummarize}
+                      disabled={loading}
+                      className={`font-bold px-8 py-3.5 rounded-xl transition-all relative overflow-hidden group border shadow-lg ${
+                        loading ? 'bg-slate-800 border-slate-700 text-slate-500' : `${active?.bg} ${active?.color} hover:bg-slate-800 ${active?.glow}`
+                      }`}
+                    >
+                      <span className="relative z-10 flex items-center justify-center gap-3">
+                        {loading ? 'Processing...' : 'Generate Summary'}
+                      </span>
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
       </div>

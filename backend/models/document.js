@@ -13,11 +13,41 @@ const documentSchema = new mongoose.Schema({
   filename: {
     type: String,
   },
+  fileType: {
+    type: String,
+  },
+  fileExtension: {
+    type: String,
+    default: '',
+  },
   mimeType: {
     type: String,
   },
   size: {
     type: Number,
+  },
+  processedText: {
+    type: String,
+    default: '',
+  },
+  textChunks: {
+    type: [String],
+    default: [],
+  },
+  textExtraction: {
+    status: {
+      type: String,
+      enum: ['pending', 'success', 'failed'],
+      default: 'pending',
+    },
+    usedOcr: {
+      type: Boolean,
+      default: false,
+    },
+    updatedAt: {
+      type: Date,
+      default: null,
+    },
   },
   url: {
     type: String,
@@ -31,13 +61,35 @@ const documentSchema = new mongoose.Schema({
     enum: ['upload', 'compress', 'merge', 'split', 'convert', 'password-protect', 'ocr', 'summarize', 'chat', 'translate', 'compare', 'entity-extraction', 'type-detection'],
     default: 'upload'
   },
+  aiFeatures: [
+    {
+      feature: { type: String, enum: ['summarize', 'entities', 'detect-type', 'translate', 'chat', 'fraud', 'ocr'] },
+      usedAt: { type: Date, default: Date.now }
+    }
+  ],
   chatHistory: [
     {
       question: String,
       answer: String,
+      source: String,
+      chunkIndex: Number,
       timestamp: { type: Date, default: Date.now }
     }
   ],
+  latestSummary: {
+    text: {
+      type: String,
+      default: '',
+    },
+    source: {
+      type: String,
+      default: '',
+    },
+    updatedAt: {
+      type: Date,
+      default: null,
+    },
+  },
   createdAt: {
     type: Date,
     default: Date.now
@@ -48,4 +100,4 @@ const documentSchema = new mongoose.Schema({
   }
 });
 
-module.exports = mongoose.model('Document', documentSchema);
+module.exports = mongoose.models.Document || mongoose.model('Document', documentSchema);

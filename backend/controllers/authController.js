@@ -1,4 +1,5 @@
 const User = require('../models/User');
+const ActivityLog = require('../models/ActivityLog');
 const jwt = require('jsonwebtoken');
 
 const generateToken = (userId, role) => {
@@ -16,12 +17,21 @@ exports.register = async (req, res) => {
     await user.save();
 
     const token = generateToken(user._id, user.role);
+
+    // Log activity
+    await new ActivityLog({
+      userId: user._id,
+      action: 'USER_REGISTER',
+      details: { email: user.email }
+    }).save();
+
     res.status(201).json({
+      success: true,
       token,
-      user: { id: user._id, name: user.name, email: user.email, role: user.role }
+      data: { id: user._id, name: user.name, email: user.email, role: user.role }
     });
   } catch (error) {
-    res.status(500).json({ message: 'Server error', error: error.message });
+    res.status(500).json({ success: false, message: 'Server error', error: error.message });
   }
 };
 
@@ -39,12 +49,21 @@ exports.login = async (req, res) => {
     await user.save();
 
     const token = generateToken(user._id, user.role);
+
+    // Log activity
+    await new ActivityLog({
+      userId: user._id,
+      action: 'USER_LOGIN',
+      details: { email: user.email }
+    }).save();
+
     res.status(200).json({
+      success: true,
       token,
-      user: { id: user._id, name: user.name, email: user.email, role: user.role }
+      data: { id: user._id, name: user.name, email: user.email, role: user.role }
     });
   } catch (error) {
-    res.status(500).json({ message: 'Server error', error: error.message });
+    res.status(500).json({ success: false, message: 'Server error', error: error.message });
   }
 };
 
@@ -52,8 +71,8 @@ exports.login = async (req, res) => {
 exports.getMe = async (req, res) => {
   try {
     const user = await User.findById(req.userId).select('-password');
-    res.status(200).json(user);
+    res.status(200).json({ success: true, data: user });
   } catch (error) {
-    res.status(500).json({ message: 'Server error', error: error.message });
+    res.status(500).json({ success: false, message: 'Server error', error: error.message });
   }
 };

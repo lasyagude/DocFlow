@@ -7,9 +7,15 @@ dotenv.config();
 
 const app = express();
 
-// ✅ FIX 1: Proper CORS 
+// CORS — allow local dev + deployed frontend
+const allowedOrigins = [
+  'http://localhost:3000',
+  'http://localhost:5173',
+  process.env.FRONTEND_URL,
+].filter(Boolean);
+
 app.use(cors({
-  origin: ['http://localhost:3000', 'http://localhost:5173'],
+  origin: allowedOrigins,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true,
@@ -18,12 +24,13 @@ app.use(cors({
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// ✅ FIX 2: Correct Route Mapping
-// Each route file now has its own unique prefix
+// Routes
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/documents', require('./routes/documents'));
-app.use('/api/ai', require('./routes/ai')); // 👈 Changed from /api/documents to /api/ai
+app.use('/api/ai', require('./routes/ai'));
+app.use('/admin', require('./routes/admin'));
 app.use('/api/admin', require('./routes/admin'));
+app.use('/api/pdf', require('./routes/pdf'));
 
 app.get('/', (req, res) => {
   res.json({ message: 'DocFlow API is running!' });
@@ -32,8 +39,7 @@ app.get('/', (req, res) => {
 mongoose.connect(process.env.MONGODB_URI)
   .then(() => {
     console.log('Connected to MongoDB Atlas!');
-    // Fallback to 5000 if PORT isn't in .env
-    const PORT = process.env.PORT || 5000; 
+    const PORT = process.env.PORT || 5000;
     app.listen(PORT, () => {
       console.log(`Server running on port ${PORT}`);
     });

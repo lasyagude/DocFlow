@@ -1,7 +1,9 @@
 import { create } from 'zustand';
 import axios from 'axios';
 
-const API = 'http://localhost:5000/api';
+const API = (typeof process !== 'undefined' ? process.env.REACT_APP_API_URL : null) || 
+            (typeof import.meta !== 'undefined' && import.meta.env ? import.meta.env.VITE_API_URL : null) || 
+            'http://localhost:5000/api';
 
 const useDocStore = create((set) => ({
   documents: [],
@@ -13,7 +15,7 @@ const useDocStore = create((set) => ({
     set({ loading: true, error: null });
     try {
       const res = await axios.get(`${API}/documents`);
-      set({ documents: res.data, loading: false });
+      set({ documents: res.data.data || res.data, loading: false });
     } catch (err) {
       set({ error: err.response?.data?.message || 'Failed to fetch', loading: false });
     }
@@ -25,13 +27,13 @@ const useDocStore = create((set) => ({
       const formData = new FormData();
       formData.append('file', file);
       const res = await axios.post(`${API}/documents/upload`, formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
         onUploadProgress: (e) => {
           if (onProgress) onProgress(Math.round((e.loaded * 100) / e.total));
         },
       });
-      set((state) => ({ documents: [res.data, ...state.documents], uploading: false }));
-      return res.data;
+      const newDoc = res.data.data || res.data.document || res.data;
+      set((state) => ({ documents: [newDoc, ...state.documents], uploading: false }));
+      return newDoc;
     } catch (err) {
       set({ error: err.response?.data?.message || 'Upload failed', uploading: false });
       return null;
@@ -42,8 +44,10 @@ const useDocStore = create((set) => ({
     try {
       await axios.delete(`${API}/documents/${id}`);
       set((state) => ({ documents: state.documents.filter((d) => d._id !== id) }));
+      return true;
     } catch (err) {
       set({ error: err.response?.data?.message || 'Delete failed' });
+      return false;
     }
   },
 

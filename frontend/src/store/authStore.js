@@ -1,7 +1,9 @@
 import { create } from 'zustand';
 import axios from 'axios';
 
-const API = 'http://localhost:5000/api';
+const API = (typeof process !== 'undefined' ? process.env.REACT_APP_API_URL : null) || 
+            (typeof import.meta !== 'undefined' && import.meta.env ? import.meta.env.VITE_API_URL : null) || 
+            'http://localhost:5000/api';
 
 axios.interceptors.request.use((config) => {
   const token = localStorage.getItem('token');
@@ -19,9 +21,10 @@ export const useAuthStore = create((set) => ({
     set({ loading: true, error: null });
     try {
       const res = await axios.post(`${API}/auth/login`, { email, password });
-      localStorage.setItem('token', res.data.token);
-      set({ token: res.data.token, user: res.data.user, loading: false });
-      return res.data.user.role;
+      const { token, data } = res.data;
+      localStorage.setItem('token', token);
+      set({ token, user: data, loading: false });
+      return data.role;
     } catch (err) {
       set({ error: err.response?.data?.message || 'Login failed', loading: false });
       return null;
@@ -32,8 +35,9 @@ export const useAuthStore = create((set) => ({
     set({ loading: true, error: null });
     try {
       const res = await axios.post(`${API}/auth/register`, { name, email, password });
-      localStorage.setItem('token', res.data.token);
-      set({ token: res.data.token, user: res.data.user, loading: false });
+      const { token, data } = res.data;
+      localStorage.setItem('token', token);
+      set({ token, user: data, loading: false });
       return true;
     } catch (err) {
       set({ error: err.response?.data?.message || 'Signup failed', loading: false });
@@ -46,7 +50,7 @@ export const useAuthStore = create((set) => ({
     if (!token) return;
     try {
       const res = await axios.get(`${API}/auth/me`);
-      set({ user: res.data });
+      set({ user: res.data.data || res.data });
     } catch {
       localStorage.removeItem('token');
       set({ token: null, user: null });

@@ -1,226 +1,347 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
-import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import useToastStore from '../store/toastStore';
+import { CardSkeleton, TableRowSkeleton, ChartSkeleton } from '../components/Skeleton';
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar } from 'recharts';
 import axios from 'axios';
 
-const API = 'http://localhost:5000/api';
+const API_BASE = (typeof process !== 'undefined' ? process.env.REACT_APP_API_URL : null) || 
+               (typeof import.meta !== 'undefined' && import.meta.env ? import.meta.env.VITE_API_URL : null) || 
+               'http://localhost:5000/api';
+const API = `${API_BASE}/admin`;
+
+const getAuthHeaders = () => ({
+  headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+});
+
+const CustomTooltip = ({ active, payload, label }) => {
+  if (active && payload && payload.length) {
+    return (
+      <div className="glass-panel p-3 border border-slate-700 rounded-lg shadow-xl shadow-black/50">
+        <p className="text-slate-300 text-xs font-mono mb-1">{label}</p>
+        <p className="text-white font-bold text-sm">Value: <span className="text-cyan-400">{payload[0].value}</span></p>
+      </div>
+    );
+  }
+  return null;
+};
 
 export default function AdminDashboard() {
   const { user, logout } = useAuthStore();
+  const toast = useToastStore;
   const navigate = useNavigate();
   const [stats, setStats] = useState(null);
   const [users, setUsers] = useState([]);
+  const [documents, setDocuments] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('overview');
   const [chatInput, setChatInput] = useState('');
   const [chatHistory, setChatHistory] = useState([
-    { role: 'assistant', text: 'Hi Admin! I can help you understand your platform analytics. Ask me anything about users, uploads, or activity!' }
+    { role: 'assistant', text: 'SYS_ADMIN_LINK_ACTIVE. Input query for platform analytics.' }
   ]);
   const [chatLoading, setChatLoading] = useState(false);
+  const [docSearch, setDocSearch] = useState('');
+  const [aiSettings, setAiSettings] = useState(null);
+  const [aiSettingsLoading, setAiSettingsLoading] = useState(false);
 
   useEffect(() => {
-    fetchStats();
-    fetchUsers();
+    const init = async () => {
+      setLoading(true);
+      await Promise.all([fetchStats(), fetchUsers(), fetchDocuments(), fetchAiSettings()]);
+      setLoading(false);
+    };
+    init();
   }, []);
 
   const fetchStats = async () => {
     try {
-      const res = await axios.get(`${API}/admin/stats`);
-      setStats(res.data);
+      const res = await axios.get(`${API}/stats`, getAuthHeaders());
+      setStats(res.data.data);
     } catch (err) {
-      console.error('Failed to fetch stats');
+      toast.getState().error('Metrics fetch failed');
     }
   };
 
   const fetchUsers = async () => {
     try {
-      const res = await axios.get(`${API}/admin/users`);
-      setUsers(res.data);
+      const res = await axios.get(`${API}/users`, getAuthHeaders());
+      setUsers(res.data.data);
+    } catch (err) {}
+  };
+
+  const fetchDocuments = async () => {
+    try {
+      const res = await axios.get(`${API}/documents`, getAuthHeaders());
+      setDocuments(res.data.data);
+    } catch (err) {}
+  };
+
+  const fetchAiSettings = async () => {
+    try {
+      const res = await axios.get(`${API}/ai-settings`, getAuthHeaders());
+      setAiSettings(res.data.data);
+    } catch (err) {}
+  };
+
+  const handleUpdateAiSettings = async (updates) => {
+    setAiSettingsLoading(true);
+    try {
+      const res = await axios.patch(`${API}/ai-settings`, updates, getAuthHeaders());
+      setAiSettings(res.data.data);
+      toast.getState().success('AI settings updated');
     } catch (err) {
-      console.error('Failed to fetch users');
+      toast.getState().error('Failed to update AI settings');
+    } finally {
+      setAiSettingsLoading(false);
+    }
+  };
+
+  const runAdminQuery = async (rawQuery) => {
+    const question = rawQuery.trim();
+    if (!question || chatLoading) return;
+
+    setChatInput(question);
+    setChatHistory((history) => [...history, { role: 'user', text: question }]);
+    setChatLoading(true);
+
+    try {
+      const res = await axios.post(
+        `${API}/query`,
+        JSON.stringify({ query: question }),
+        {
+          ...getAuthHeaders(),
+          headers: {
+            ...getAuthHeaders().headers,
+            'Content-Type': 'application/json',
+          },
+        }
+      );
+
+      console.log('Admin query response:', res.data);
+      const answer = res.data.answer || 'No response received.';
+      setChatHistory((history) => [...history, { role: 'assistant', text: answer }]);
+    } catch (err) {
+      const errorMessage =
+        err.response?.data?.answer ||
+        err.response?.data?.message ||
+        'Query execution failed.';
+
+      setChatHistory((history) => [...history, { role: 'assistant', text: errorMessage }]);
+    } finally {
+      setChatLoading(false);
+      setChatInput('');
     }
   };
 
   const handleToggleUser = async (id) => {
-    await axios.patch(`${API}/admin/users/${id}/toggle`);
-    fetchUsers();
+    try {
+      const res = await axios.patch(`${API}/users/${id}/toggle`, {}, getAuthHeaders());
+      toast.getState().success(res.data.message);
+      fetchUsers();
+    } catch (err) {
+      toast.getState().error('Status mutation failed');
+    }
   };
 
   const handleDeleteUser = async (id) => {
-    if (!window.confirm('Delete this user?')) return;
-    await axios.delete(`${API}/admin/users/${id}`);
-    fetchUsers();
-    fetchStats();
+    try {
+      await axios.delete(`${API}/users/${id}`, getAuthHeaders());
+      toast.getState().success('Agent record purged');
+      fetchUsers();
+      fetchStats();
+    } catch (err) {
+      toast.getState().error('Purge failed');
+    }
+  };
+
+  const handleDeleteDocument = async (id) => {
+    try {
+      await axios.delete(`${API}/documents/${id}`, getAuthHeaders());
+      toast.getState().success('Data packet destroyed');
+      setDocuments(documents.filter(d => d._id !== id));
+      fetchStats();
+    } catch (err) {
+      toast.getState().error('Destruction failed');
+    }
   };
 
   const handleChat = async (e) => {
     e.preventDefault();
-    if (!chatInput.trim()) return;
-    const question = chatInput;
-    setChatInput('');
-    setChatHistory(h => [...h, { role: 'user', text: question }]);
-    setChatLoading(true);
-
-    // Build context from stats
-    const context = stats ? `
-      Platform Stats:
-      - Total Users: ${stats.totalUsers}
-      - Total Documents: ${stats.totalDocs}
-      - New Users Today: ${stats.newUsersToday}
-      - Uploads Today: ${stats.uploadsToday}
-      - New Users This Week: ${stats.newUsersThisWeek}
-      - Most Active Users: ${stats.mostActiveUsers?.map(u => `${u.name} (${u.docCount} docs)`).join(', ')}
-    ` : 'No stats available yet.';
-
-    try {
-      const res = await axios.post('https://api.anthropic.com/v1/messages', {
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 500,
-        messages: [{ role: 'user', content: `You are an AI assistant for DocFlow admin panel. Here is the current platform data:\n${context}\n\nAdmin question: ${question}\n\nGive a concise, helpful answer.` }]
-      }, { headers: { 'Content-Type': 'application/json' } });
-      const answer = res.data?.content?.[0]?.text || 'I could not process that.';
-      setChatHistory(h => [...h, { role: 'assistant', text: answer }]);
-    } catch {
-      // Fallback smart responses based on keywords
-      let answer = "I don't have enough data to answer that yet.";
-      const q = question.toLowerCase();
-      if (q.includes('user') && q.includes('total')) answer = `You have ${stats?.totalUsers || 0} total users on the platform.`;
-      else if (q.includes('upload') || q.includes('document')) answer = `There are ${stats?.totalDocs || 0} total documents uploaded. Today's uploads: ${stats?.uploadsToday || 0}.`;
-      else if (q.includes('active')) answer = `Most active users: ${stats?.mostActiveUsers?.map(u => `${u.name} (${u.docCount} docs)`).join(', ') || 'No data yet'}.`;
-      else if (q.includes('today')) answer = `Today: ${stats?.newUsersToday || 0} new users and ${stats?.uploadsToday || 0} document uploads.`;
-      else if (q.includes('week')) answer = `This week: ${stats?.newUsersThisWeek || 0} new users joined the platform.`;
-      setChatHistory(h => [...h, { role: 'assistant', text: answer }]);
-    } finally {
-      setChatLoading(false);
-    }
+    await runAdminQuery(chatInput);
   };
 
-  const handleLogout = () => { logout(); navigate('/'); };
+  const formatSize = (bytes) => {
+    if (!bytes) return '0 B';
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+    return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+  };
 
   const statCards = stats ? [
-    { label: 'Total Users', value: stats.totalUsers, icon: '👥', color: 'bg-blue-50 text-blue-600', change: `+${stats.newUsersThisWeek} this week` },
-    { label: 'Total Documents', value: stats.totalDocs, icon: '📄', color: 'bg-purple-50 text-purple-600', change: `+${stats.uploadsToday} today` },
-    { label: 'New Today', value: stats.newUsersToday, icon: '✨', color: 'bg-green-50 text-green-600', change: 'new signups' },
-    { label: 'Uploads Today', value: stats.uploadsToday, icon: '📤', color: 'bg-orange-50 text-orange-600', change: 'documents' },
+    { label: 'REGISTERED AGENTS', value: stats.totalUsers, icon: '👥', color: 'text-indigo-400', change: `+${stats.newUsersThisWeek} THIS_CYCLE` },
+    { label: 'CORE PACKETS', value: stats.totalDocs, icon: '📄', color: 'text-cyan-400', change: `+${stats.uploadsToday} TODAY` },
+    { label: 'NEW INGESTS', value: stats.newUsersToday, icon: '✨', color: 'text-emerald-400', change: 'NEW REGISTRATIONS' },
+    { label: 'CORE MASS', value: formatSize(stats.totalStorage), icon: '💾', color: 'text-purple-400', change: `${stats.totalDocs} FILES` },
   ] : [];
 
+  const filteredDocs = documents.filter(d => {
+    if (!docSearch) return true;
+    const s = docSearch.toLowerCase();
+    return (d.originalName || '').toLowerCase().includes(s) ||
+      (d.userId?.name || '').toLowerCase().includes(s) ||
+      (d.userId?.email || '').toLowerCase().includes(s);
+  });
+
+  const overviewMetricCards = stats ? [
+    {
+      label: 'TOTAL USERS',
+      value: stats.totalUsers,
+      icon: 'U',
+      color: 'text-indigo-400',
+      change: `+${stats.newUsersThisWeek} THIS WEEK`,
+    },
+    {
+      label: 'TOTAL DOCUMENTS',
+      value: stats.totalDocs,
+      icon: 'D',
+      color: 'text-cyan-400',
+      change: `+${stats.uploadsToday} UPLOADED TODAY`,
+    },
+    {
+      label: 'OCR USAGE',
+      value: stats.ocrUsageCount || 0,
+      icon: 'O',
+      color: 'text-emerald-400',
+      change: `${stats.totalDocs ? Math.round(((stats.ocrUsageCount || 0) / stats.totalDocs) * 100) : 0}% OF DOCUMENTS`,
+    },
+    {
+      label: 'AI VS FALLBACK',
+      value: `${stats.responseSourceUsage?.ai || 0} / ${stats.responseSourceUsage?.fallback || 0}`,
+      icon: 'A',
+      color: 'text-purple-400',
+      change: 'AI / FALLBACK RESPONSES',
+    },
+  ] : [];
+
+  const AI_LABELS = { summarize: 'SUMMARIZE', chat: 'CHAT' };
+
   return (
-    <div className="min-h-screen bg-gray-50 flex">
-      {/* Sidebar */}
-      <div className="w-64 bg-white border-r flex flex-col shadow-sm">
-        <div className="p-6 border-b">
+    <div className="min-h-screen bg-slate-950 text-slate-300 flex font-sans">
+      {/* Sidebar Command Line */}
+      <div className="w-64 glass-panel border-r border-slate-800 flex flex-col relative z-20">
+        <div className="p-6 border-b border-slate-800">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center text-white font-bold text-lg">D</div>
-            <div>
-              <h1 className="font-bold text-gray-900">DocFlow</h1>
-              <p className="text-xs text-blue-600 font-medium">Admin Panel</p>
-            </div>
+             <div className="w-10 h-10 bg-rose-500/20 border border-rose-500/50 rounded-xl flex items-center justify-center text-rose-400 font-bold text-lg shadow-[0_0_15px_rgba(244,63,94,0.3)]">O</div>
+             <div>
+               <h1 className="font-bold text-white tracking-tight">DocFlow</h1>
+               <p className="text-xs text-rose-400 font-mono tracking-widest mt-0.5 flex items-center gap-1">
+                 <span className="w-1.5 h-1.5 rounded-full bg-rose-400 animate-pulse"></span> OVERSEER
+               </p>
+             </div>
           </div>
         </div>
 
-        <nav className="flex-1 p-4 space-y-1">
+        <nav className="flex-1 p-4 space-y-2">
           {[
-            { id: 'overview', label: 'Overview', icon: '📊' },
-            { id: 'users', label: 'Users', icon: '👥' },
-            { id: 'assistant', label: 'AI Assistant', icon: '🤖' },
+            { id: 'overview', label: 'METRICS', icon: '📊' },
+            { id: 'users', label: 'AGENTS', icon: '👥' },
+            { id: 'documents', label: 'ARCHIVES', icon: '📁' },
+            { id: 'ai-settings', label: 'AI_SETTINGS', icon: '⚙️' },
+            { id: 'assistant', label: 'AI_OVERSEER', icon: '🤖' },
           ].map(item => (
             <button key={item.id} onClick={() => setActiveTab(item.id)}
-              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-left transition font-medium ${
-                activeTab === item.id ? 'bg-blue-50 text-blue-700' : 'text-gray-600 hover:bg-gray-50'
+              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl border text-left transition-all font-mono font-bold text-sm tracking-wider ${
+                activeTab === item.id 
+                  ? 'bg-rose-500/10 border-rose-500/50 text-rose-400 shadow-[0_0_15px_rgba(244,63,94,0.2)]' 
+                  : 'text-slate-500 border-transparent hover:bg-slate-800 hover:border-slate-700 hover:text-white'
               }`}>
-              <span>{item.icon}</span>
+              <span className="text-xl">{item.icon}</span>
               <span>{item.label}</span>
             </button>
           ))}
         </nav>
 
-        <div className="p-4 border-t">
-          <div className="flex items-center gap-3 mb-3 px-2">
-            <div className="w-8 h-8 bg-gray-200 rounded-full flex items-center justify-center text-sm font-bold">A</div>
-            <div>
-              <p className="text-sm font-medium text-gray-900">{user?.name}</p>
-              <p className="text-xs text-gray-400">Administrator</p>
-            </div>
-          </div>
-          <button onClick={handleLogout} className="w-full bg-red-50 text-red-600 hover:bg-red-100 py-2 rounded-xl text-sm font-medium transition">
-            Sign Out
+        <div className="p-4 border-t border-slate-800">
+          <button onClick={() => { logout(); navigate('/'); }} className="w-full bg-slate-900 border border-slate-700 hover:bg-red-950 hover:border-red-500/50 text-slate-400 hover:text-red-400 py-3 rounded-xl text-sm font-bold transition">
+            TERMINATE_ACCESS
           </button>
         </div>
       </div>
 
-      {/* Main Content */}
-      <div className="flex-1 overflow-auto">
-        <div className="p-8">
+      {/* Main Content Area */}
+      <div className="flex-1 overflow-auto relative">
+        <div className="absolute top-0 right-0 w-[600px] h-[600px] bg-rose-600/5 rounded-full blur-[120px] pointer-events-none" />
+        
+        <div className="p-8 max-w-7xl mx-auto relative z-10">
 
-          {/* Overview Tab */}
+          {/* Overview */}
           {activeTab === 'overview' && (
             <div className="space-y-6">
-              <div>
-                <h2 className="text-2xl font-bold text-gray-900">Platform Overview</h2>
-                <p className="text-gray-500 mt-1">Monitor your DocFlow platform activity</p>
-              </div>
+              <header className="mb-8">
+                <h2 className="text-2xl font-bold text-white tracking-tight">System Global Metrics</h2>
+                <p className="text-slate-500 mt-1 font-mono text-sm">DATACENTER_MONITOR_ONLINE</p>
+              </header>
 
-              <div className="grid grid-cols-4 gap-4">
-                {statCards.map(card => (
-                  <div key={card.label} className="bg-white rounded-2xl p-5 shadow-sm border">
-                    <div className={`w-10 h-10 ${card.color} rounded-xl flex items-center justify-center text-xl mb-3`}>
-                      {card.icon}
-                    </div>
-                    <div className="text-3xl font-bold text-gray-900">{card.value}</div>
-                    <div className="text-sm font-medium text-gray-600 mt-1">{card.label}</div>
-                    <div className="text-xs text-gray-400 mt-1">{card.change}</div>
-                  </div>
-                ))}
-              </div>
-
-              {/* Upload Activity Chart */}
-              <div className="bg-white rounded-2xl p-6 shadow-sm border">
-                <h3 className="font-bold text-gray-800 mb-4">Upload Activity (Last 7 Days)</h3>
-                {stats?.uploadActivity?.length > 0 ? (
-                  <ResponsiveContainer width="100%" height={200}>
-                    <AreaChart data={stats.uploadActivity}>
-                      <defs>
-                        <linearGradient id="grad" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.2} />
-                          <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
-                        </linearGradient>
-                      </defs>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                      <XAxis dataKey="_id" tick={{ fontSize: 12 }} />
-                      <YAxis tick={{ fontSize: 12 }} allowDecimals={false} />
-                      <Tooltip />
-                      <Area type="monotone" dataKey="count" stroke="#3b82f6" fill="url(#grad)" strokeWidth={2} />
-                    </AreaChart>
-                  </ResponsiveContainer>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
+                {loading ? (
+                  Array.from({ length: 4 }).map((_, i) => <CardSkeleton key={i} />)
                 ) : (
-                  <div className="text-center py-10 text-gray-400">No upload activity yet</div>
+                  overviewMetricCards.map(card => (
+                    <div key={card.label} className="glass-panel border border-slate-800 rounded-2xl p-6 relative overflow-hidden group hover:border-slate-600 transition-colors">
+                      <div className={`w-12 h-12 bg-slate-900 border border-slate-700 rounded-xl flex items-center justify-center text-2xl mb-4 ${card.color}`}>
+                        {card.icon}
+                      </div>
+                      <div className="text-4xl font-black text-white tracking-tighter mb-1">{card.value}</div>
+                      <div className="text-xs font-mono font-bold text-slate-400">{card.label}</div>
+                      <div className="text-[10px] font-mono text-slate-600 mt-2">{card.change}</div>
+                    </div>
+                  ))
                 )}
               </div>
 
-              {/* Most Active Users */}
-              <div className="bg-white rounded-2xl p-6 shadow-sm border">
-                <h3 className="font-bold text-gray-800 mb-4">Most Active Users</h3>
-                {stats?.mostActiveUsers?.length > 0 ? (
-                  <div className="space-y-3">
-                    {stats.mostActiveUsers.map((u, i) => (
-                      <div key={i} className="flex items-center justify-between py-2">
-                        <div className="flex items-center gap-3">
-                          <div className="w-8 h-8 bg-blue-100 text-blue-700 rounded-full flex items-center justify-center font-bold text-sm">
-                            {u.name?.[0]?.toUpperCase()}
-                          </div>
-                          <div>
-                            <p className="font-medium text-gray-800 text-sm">{u.name}</p>
-                            <p className="text-xs text-gray-400">{u.email}</p>
-                          </div>
-                        </div>
-                        <div className="bg-blue-50 text-blue-700 px-3 py-1 rounded-full text-xs font-bold">
-                          {u.docCount} docs
-                        </div>
-                      </div>
-                    ))}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                 {/* Upload Activity Chart */}
+                {loading ? <ChartSkeleton /> : (
+                  <div className="glass-panel border border-slate-800 rounded-2xl p-6">
+                    <h3 className="font-mono font-bold text-slate-400 text-sm tracking-wide mb-6">NETWORK_TRAFFIC (7D)</h3>
+                    {stats?.uploadActivity?.length > 0 ? (
+                      <ResponsiveContainer width="100%" height={220}>
+                        <AreaChart data={stats.uploadActivity} margin={{ left: -20, bottom: 0 }}>
+                          <defs>
+                            <linearGradient id="gradRose" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="5%" stopColor="#f43f5e" stopOpacity={0.3} />
+                              <stop offset="95%" stopColor="#f43f5e" stopOpacity={0} />
+                            </linearGradient>
+                          </defs>
+                          <CartesianGrid strokeDasharray="3 3" stroke="#334155" vertical={false} />
+                          <XAxis dataKey="_id" tick={{ fill: '#64748b', fontSize: 10, fontFamily: 'monospace' }} axisLine={false} tickLine={false} />
+                          <YAxis tick={{ fill: '#64748b', fontSize: 10, fontFamily: 'monospace' }} allowDecimals={false} axisLine={false} tickLine={false} />
+                          <Tooltip content={<CustomTooltip />} />
+                          <Area type="monotone" dataKey="count" stroke="#f43f5e" fill="url(#gradRose)" strokeWidth={2} />
+                        </AreaChart>
+                      </ResponsiveContainer>
+                    ) : (
+                      <div className="text-center py-10 text-slate-600 font-mono">NULL_TRAFFIC</div>
+                    )}
                   </div>
-                ) : (
-                  <div className="text-center py-6 text-gray-400">No activity yet</div>
+                )}
+
+                 {/* AI Usage */}
+                 {!loading && stats?.aiUsage?.length > 0 && (
+                  <div className="glass-panel border border-slate-800 rounded-2xl p-6">
+                    <h3 className="font-mono font-bold text-slate-400 text-sm tracking-wide mb-6">AI_PROCESS_DISPERSION</h3>
+                    <ResponsiveContainer width="100%" height={220}>
+                      <BarChart data={stats.aiUsage.map(u => ({ name: AI_LABELS[u._id] || u._id, count: u.count }))} margin={{ left: -20, bottom: 0 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#334155" vertical={false} />
+                        <XAxis dataKey="name" tick={{ fill: '#64748b', fontSize: 10, fontFamily: 'monospace' }} axisLine={false} tickLine={false} />
+                        <YAxis tick={{ fill: '#64748b', fontSize: 10, fontFamily: 'monospace' }} allowDecimals={false} axisLine={false} tickLine={false} />
+                        <Tooltip content={<CustomTooltip />} cursor={{ fill: '#334155', opacity: 0.4 }} />
+                        <Bar dataKey="count" fill="#8b5cf6" radius={[4, 4, 0, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
                 )}
               </div>
             </div>
@@ -229,126 +350,232 @@ export default function AdminDashboard() {
           {/* Users Tab */}
           {activeTab === 'users' && (
             <div className="space-y-6">
-              <div className="flex justify-between items-center">
+              <header className="flex justify-between items-end mb-6">
                 <div>
-                  <h2 className="text-2xl font-bold text-gray-900">Users</h2>
-                  <p className="text-gray-500 mt-1">{users.length} registered users</p>
+                  <h2 className="text-2xl font-bold text-white tracking-tight">Agent Network</h2>
+                  <p className="text-slate-500 mt-1 font-mono text-sm">TOTAL: {users.length}</p>
                 </div>
-              </div>
+              </header>
 
-              <div className="bg-white rounded-2xl shadow-sm border overflow-hidden">
-                <table className="w-full">
-                  <thead className="bg-gray-50 border-b">
+              <div className="glass-panel border border-slate-800 rounded-2xl overflow-hidden">
+                <table className="w-full text-left">
+                  <thead className="bg-slate-900/80 border-b border-slate-800">
                     <tr>
-                      <th className="text-left px-6 py-4 text-xs font-bold text-gray-500 uppercase">User</th>
-                      <th className="text-left px-6 py-4 text-xs font-bold text-gray-500 uppercase">Joined</th>
-                      <th className="text-left px-6 py-4 text-xs font-bold text-gray-500 uppercase">Status</th>
-                      <th className="text-right px-6 py-4 text-xs font-bold text-gray-500 uppercase">Actions</th>
+                      <th className="px-6 py-4 text-xs font-mono font-bold tracking-wider text-slate-500 uppercase">Identity</th>
+                      <th className="px-6 py-4 text-xs font-mono font-bold tracking-wider text-slate-500 uppercase">Enlistment</th>
+                      <th className="px-6 py-4 text-xs font-mono font-bold tracking-wider text-slate-500 uppercase">Link State</th>
+                      <th className="px-6 py-4 text-xs font-mono font-bold tracking-wider text-slate-500 uppercase text-right">Overrides</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-gray-100">
-                    {users.map(u => (
-                      <tr key={u._id} className="hover:bg-gray-50 transition">
-                        <td className="px-6 py-4">
-                          <div className="flex items-center gap-3">
-                            <div className="w-9 h-9 bg-gradient-to-br from-blue-400 to-indigo-500 rounded-full flex items-center justify-center text-white font-bold text-sm">
-                              {u.name?.[0]?.toUpperCase()}
+                  <tbody className="divide-y divide-slate-800/50">
+                    {loading ? (
+                      Array.from({ length: 5 }).map((_, i) => <TableRowSkeleton key={i} />)
+                    ) : (
+                      users.map(u => (
+                        <tr key={u._id} className="hover:bg-slate-800/40 transition-colors group">
+                          <td className="px-6 py-4">
+                            <div className="flex items-center gap-4">
+                              <div className="w-10 h-10 bg-slate-800 border border-slate-700 rounded-lg flex items-center justify-center text-white font-bold text-sm">
+                                {u.name?.[0]?.toUpperCase()}
+                              </div>
+                              <div>
+                                <p className="font-bold text-slate-200 group-hover:text-white transition-colors">{u.name}</p>
+                                <p className="text-xs text-slate-500 font-mono mt-0.5">{u.email}</p>
+                              </div>
                             </div>
-                            <div>
-                              <p className="font-semibold text-gray-900 text-sm">{u.name}</p>
-                              <p className="text-xs text-gray-400">{u.email}</p>
+                          </td>
+                          <td className="px-6 py-4 text-sm text-slate-400 font-mono">
+                            {new Date(u.createdAt).toISOString().split('T')[0]}
+                          </td>
+                          <td className="px-6 py-4">
+                            <span className={`px-3 py-1 rounded-md text-xs font-mono font-bold border ${u.isActive !== false ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' : 'bg-red-500/10 border-red-500/30 text-red-400'}`}>
+                              {u.isActive !== false ? 'ONLINE' : 'LOCKED'}
+                            </span>
+                          </td>
+                          <td className="px-6 py-4 text-right">
+                            <div className="flex items-center justify-end gap-3">
+                              <button onClick={() => handleToggleUser(u._id)}
+                                className={`px-4 py-2 rounded-lg text-xs font-mono font-bold border transition-colors ${u.isActive !== false ? 'border-amber-500/30 text-amber-500 hover:bg-amber-500/10' : 'border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/10'}`}>
+                                {u.isActive !== false ? 'SUSPEND' : 'RESTORE'}
+                              </button>
+                              <button onClick={() => handleDeleteUser(u._id)}
+                                className="px-4 py-2 bg-red-950/50 border border-red-500/50 text-red-500 hover:bg-red-600 hover:text-white rounded-lg text-xs font-mono font-bold transition-colors">
+                                EXTRACT
+                              </button>
                             </div>
-                          </div>
-                        </td>
-                        <td className="px-6 py-4 text-sm text-gray-500">
-                          {new Date(u.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-                        </td>
-                        <td className="px-6 py-4">
-                          <span className={`px-3 py-1 rounded-full text-xs font-bold ${u.isActive ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
-                            {u.isActive ? 'Active' : 'Disabled'}
-                          </span>
-                        </td>
-                        <td className="px-6 py-4 text-right">
-                          <div className="flex items-center justify-end gap-2">
-                            <button onClick={() => handleToggleUser(u._id)}
-                              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition ${u.isActive ? 'bg-yellow-50 text-yellow-700 hover:bg-yellow-100' : 'bg-green-50 text-green-700 hover:bg-green-100'}`}>
-                              {u.isActive ? 'Disable' : 'Enable'}
-                            </button>
-                            <button onClick={() => handleDeleteUser(u._id)}
-                              className="px-3 py-1.5 bg-red-50 text-red-700 hover:bg-red-100 rounded-lg text-xs font-medium transition">
-                              Delete
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
+                          </td>
+                        </tr>
+                      ))
+                    )}
                   </tbody>
                 </table>
-                {users.length === 0 && (
-                  <div className="text-center py-12 text-gray-400">No users yet</div>
-                )}
+                {!loading && users.length === 0 && <div className="text-center py-16 text-slate-600 font-mono">NO_AGENTS_FOUND</div>}
               </div>
             </div>
           )}
 
-          {/* AI Assistant Tab */}
-          {activeTab === 'assistant' && (
+           {/* Documents Tab */}
+           {activeTab === 'documents' && (
             <div className="space-y-6">
-              <div>
-                <h2 className="text-2xl font-bold text-gray-900">AI Assistant</h2>
-                <p className="text-gray-500 mt-1">Ask anything about your platform analytics</p>
-              </div>
+              <header className="flex justify-between items-end mb-6">
+                <div>
+                  <h2 className="text-2xl font-bold text-white tracking-tight">Mass Archive Data</h2>
+                  <p className="text-slate-500 mt-1 font-mono text-sm">TOTAL: {documents.length}</p>
+                </div>
+                <input
+                  type="text"
+                  value={docSearch}
+                  onChange={(e) => setDocSearch(e.target.value)}
+                  placeholder="QUERY_IDENTIFIER..."
+                  className="bg-slate-900 border border-slate-700 rounded-xl px-4 py-2 text-sm outline-none focus:border-cyan-500 text-white font-mono w-64"
+                />
+              </header>
 
-              <div className="bg-white rounded-2xl shadow-sm border overflow-hidden flex flex-col" style={{ height: '60vh' }}>
-                <div className="flex-1 overflow-y-auto p-6 space-y-4">
-                  {chatHistory.map((msg, i) => (
-                    <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                      <div className={`max-w-lg px-4 py-3 rounded-2xl text-sm leading-relaxed ${
-                        msg.role === 'user'
-                          ? 'bg-blue-600 text-white rounded-br-sm'
-                          : 'bg-gray-100 text-gray-800 rounded-bl-sm'
+              <div className="glass-panel border border-slate-800 rounded-2xl overflow-hidden">
+                 <table className="w-full text-left">
+                  <thead className="bg-slate-900/80 border-b border-slate-800">
+                    <tr>
+                      <th className="px-6 py-4 text-xs font-mono font-bold tracking-wider text-slate-500 uppercase">Data Block</th>
+                      <th className="px-6 py-4 text-xs font-mono font-bold tracking-wider text-slate-500 uppercase">Owned By</th>
+                      <th className="px-6 py-4 text-xs font-mono font-bold tracking-wider text-slate-500 uppercase">Mass/Time</th>
+                      <th className="px-6 py-4 text-xs font-mono font-bold tracking-wider text-slate-500 uppercase text-right">Overrides</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/50">
+                    {loading ? (
+                      Array.from({ length: 5 }).map((_, i) => <TableRowSkeleton key={i} columns={4} />)
+                    ) : (
+                      filteredDocs.map(doc => (
+                        <tr key={doc._id} className="hover:bg-slate-800/40 transition-colors group">
+                           <td className="px-6 py-4">
+                            <div className="flex items-center gap-3">
+                              <span className="text-lg opacity-70">📄</span>
+                              <div>
+                                <p className="font-bold text-slate-200 group-hover:text-white transition-colors truncate max-w-[200px]">{doc.originalName || doc.filename}</p>
+                                <p className="text-[10px] text-slate-500 font-mono mt-0.5">{doc.mimeType || 'unknown'}</p>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="px-6 py-4">
+                            <p className="font-bold text-slate-300 group-hover:text-white transition-colors">{doc.userId?.name || 'ORPHAN_NODE'}</p>
+                            <p className="text-xs text-slate-500 font-mono mt-0.5">{doc.userId?.email || '--'}</p>
+                          </td>
+                          <td className="px-6 py-4 flex flex-col">
+                            <span className="text-sm font-mono text-cyan-400">{formatSize(doc.size)}</span>
+                            <span className="text-xs font-mono text-slate-500">{new Date(doc.createdAt).toISOString().split('T')[0]}</span>
+                          </td>
+                          <td className="px-6 py-4 text-right">
+                             <div className="flex items-center justify-end gap-3">
+                              {doc.url && (
+                                <a href={doc.url} target="_blank" rel="noreferrer" className="px-4 py-2 rounded-lg border border-cyan-500/30 text-cyan-500 hover:bg-cyan-500/10 text-xs font-mono font-bold transition-colors">VIEW</a>
+                              )}
+                              <button onClick={() => handleDeleteDocument(doc._id)} className="px-4 py-2 bg-red-950/50 border border-red-500/50 text-red-500 hover:bg-red-600 hover:text-white rounded-lg text-xs font-mono font-bold transition-colors">PURGE</button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+                {!loading && filteredDocs.length === 0 && <div className="text-center py-16 text-slate-600 font-mono">NO_DATA_BLOCKS_FOUND</div>}
+              </div>
+            </div>
+           )}
+
+          {/* AI Settings Tab */}
+          {activeTab === 'ai-settings' && (
+            <div className="space-y-6 max-w-2xl">
+              <header className="mb-8">
+                <h2 className="text-2xl font-bold text-white tracking-tight">AI Feature Controls</h2>
+                <p className="text-slate-500 mt-1 font-mono text-sm">SYSTEM_AI_CONFIGURATION</p>
+              </header>
+              {aiSettings === null ? (
+                <div className="glass-panel border border-slate-800 rounded-2xl p-8 text-center text-slate-600 font-mono">LOADING_CONFIG...</div>
+              ) : (
+                <div className="glass-panel border border-slate-800 rounded-2xl p-6 space-y-5">
+                  <div className="flex items-center justify-between p-4 bg-slate-900/80 rounded-xl border border-slate-800">
+                    <div>
+                      <p className="font-mono font-bold text-white text-sm">AI_ENGINE_ENABLED</p>
+                      <p className="text-xs text-slate-500 mt-1">Master switch for all AI features</p>
+                    </div>
+                    <button onClick={() => handleUpdateAiSettings({ aiEnabled: !aiSettings.aiEnabled, fallbackOnly: aiSettings.fallbackOnly })} disabled={aiSettingsLoading}
+                      className={`relative w-14 h-7 rounded-full border transition-all duration-300 ${aiSettings.aiEnabled ? 'bg-emerald-500/20 border-emerald-500/50' : 'bg-slate-800 border-slate-700'}`}>
+                      <span className={`absolute top-1 w-5 h-5 rounded-full transition-all duration-300 ${aiSettings.aiEnabled ? 'left-8 bg-emerald-400' : 'left-1 bg-slate-500'}`} />
+                    </button>
+                  </div>
+                  <div className="flex items-center justify-between p-4 bg-slate-900/80 rounded-xl border border-slate-800">
+                    <div>
+                      <p className="font-mono font-bold text-white text-sm">FALLBACK_ONLY_MODE</p>
+                      <p className="text-xs text-slate-500 mt-1">Force fallback even when AI is available</p>
+                    </div>
+                    <button onClick={() => handleUpdateAiSettings({ aiEnabled: aiSettings.aiEnabled, fallbackOnly: !aiSettings.fallbackOnly })} disabled={aiSettingsLoading}
+                      className={`relative w-14 h-7 rounded-full border transition-all duration-300 ${aiSettings.fallbackOnly ? 'bg-amber-500/20 border-amber-500/50' : 'bg-slate-800 border-slate-700'}`}>
+                      <span className={`absolute top-1 w-5 h-5 rounded-full transition-all duration-300 ${aiSettings.fallbackOnly ? 'left-8 bg-amber-400' : 'left-1 bg-slate-500'}`} />
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Assistant Tab */}
+          {activeTab === 'assistant' && (
+            <div className="max-w-4xl mx-auto flex flex-col h-[70vh]">
+              <header className="mb-6">
+                <h2 className="text-2xl font-bold text-white tracking-tight">Overseer Neural Link</h2>
+                <p className="text-slate-500 mt-1 font-mono text-sm">QUERY_SYSTEM_STATE</p>
+              </header>
+
+              <div className="flex-1 glass-panel border border-slate-800 rounded-3xl overflow-hidden flex flex-col shadow-2xl relative">
+                <div className="absolute inset-0 bg-gradient-to-t from-rose-500/5 to-transparent pointer-events-none" />
+                <div className="flex-1 overflow-y-auto p-6 space-y-6 relative z-10">
+                  {chatHistory.map((msg, idx) => (
+                    <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                      <div className={`max-w-[75%] rounded-2xl px-5 py-4 ${
+                        msg.role === 'user' 
+                          ? 'bg-rose-600 text-white rounded-br-sm shadow-lg shadow-rose-900/50' 
+                          : 'bg-slate-900 border border-slate-700 text-slate-300 rounded-bl-sm font-mono text-sm leading-relaxed'
                       }`}>
-                        {msg.text}
+                         {msg.role === 'assistant' && <div className="text-[10px] font-bold text-rose-500 mb-2 font-sans tracking-wide uppercase">SYSTEM_RESPONSE //</div>}
+                         {msg.text}
                       </div>
                     </div>
                   ))}
                   {chatLoading && (
                     <div className="flex justify-start">
-                      <div className="bg-gray-100 px-4 py-3 rounded-2xl rounded-bl-sm">
-                        <div className="flex gap-1">
-                          <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                          <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                          <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
-                        </div>
+                      <div className="bg-slate-900 border border-slate-700 px-5 py-4 rounded-2xl rounded-bl-sm flex gap-2">
+                         <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse" />
+                         <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse delay-75" />
+                         <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse delay-150" />
                       </div>
                     </div>
                   )}
                 </div>
 
-                <form onSubmit={handleChat} className="border-t p-4 flex gap-3">
-                  <input
-                    value={chatInput}
-                    onChange={(e) => setChatInput(e.target.value)}
-                    placeholder="Ask about users, uploads, activity..."
-                    className="flex-1 border-2 border-gray-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-blue-500 transition"
-                  />
-                  <button type="submit" disabled={chatLoading}
-                    className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-xl font-medium text-sm transition disabled:opacity-50">
-                    Send
-                  </button>
-                </form>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                {['How many users signed up today?', 'Who are the most active users?', 'How many documents were uploaded this week?', 'What is the total storage usage?'].map(q => (
-                  <button key={q} onClick={() => setChatInput(q)}
-                    className="text-left bg-white border hover:border-blue-300 rounded-xl px-4 py-3 text-sm text-gray-600 hover:text-blue-600 transition">
-                    💬 {q}
-                  </button>
-                ))}
+                <div className="bg-slate-950/80 p-4 border-t border-slate-800 relative z-10 font-sans">
+                  <div className="flex flex-wrap gap-2 mb-4">
+                     {['How many agents enlisted this week?', 'Who holds the most data blocks?', 'Present mass parameters.', 'Analyze total packets array.'].map(q => (
+                       <button key={q} onClick={() => runAdminQuery(q)} className="bg-slate-900 border border-slate-700 hover:border-rose-500/50 hover:text-rose-400 text-slate-400 px-3 py-1.5 rounded-lg text-xs font-mono transition-colors">
+                         &gt; {q}
+                       </button>
+                     ))}
+                  </div>
+                  <form onSubmit={handleChat} className="flex gap-3">
+                    <input
+                      value={chatInput}
+                      onChange={(e) => setChatInput(e.target.value)}
+                      placeholder="Enter command sequence..."
+                      className="flex-1 bg-slate-900 border border-slate-700 rounded-xl px-5 py-3 outline-none focus:border-rose-500 text-white font-mono text-sm placeholder-slate-600"
+                    />
+                    <button type="submit" disabled={chatLoading} className="bg-rose-600 hover:bg-rose-500 text-white font-bold px-8 rounded-xl text-sm transition-all shadow-lg shadow-rose-900/50 disabled:opacity-50 disabled:shadow-none">
+                      EXECUTE
+                    </button>
+                  </form>
+                </div>
               </div>
             </div>
           )}
+
         </div>
       </div>
     </div>

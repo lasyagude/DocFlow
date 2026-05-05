@@ -16,67 +16,77 @@ export default function Signup() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-900 via-blue-800 to-indigo-900 flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-8">
-        <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-gray-900">Create account</h1>
-          <p className="text-gray-500 mt-2">Join DocFlow for free</p>
+    <div className="min-h-screen bg-slate-950 flex items-center justify-center p-6 relative overflow-hidden">
+      <div className="absolute top-[-20%] right-[-10%] w-[50%] h-[50%] bg-cyan-600/20 rounded-full blur-[120px] pointer-events-none" />
+      <div className="absolute bottom-[-20%] left-[-10%] w-[50%] h-[50%] bg-indigo-600/20 rounded-full blur-[120px] pointer-events-none" />
+
+      <div className="w-full max-w-md glass-panel p-10 rounded-3xl border border-slate-800 shadow-2xl relative z-10">
+        <div className="flex justify-center mb-8">
+          <Link to="/">
+            <img src="/logo.png" alt="DocFlow" className="w-16 h-16 rounded-xl shadow-lg shadow-cyan-500/20 hover:scale-105 transition-transform" />
+          </Link>
+        </div>
+
+        <div className="text-center mb-10">
+          <h1 className="text-3xl font-bold text-white mb-2 tracking-tight">Create Account</h1>
+          <p className="text-slate-400">Sign up to start processing documents</p>
         </div>
 
         {error && (
-          <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg p-3 mb-4 flex justify-between items-center">
-            <span>{error}</span>
-            <button onClick={clearError} className="text-red-500 font-bold ml-2">×</button>
+          <div className="bg-red-950/50 border border-red-500/50 text-red-200 rounded-xl p-4 mb-6 flex justify-between items-center animate-slide-in">
+            <span className="text-sm font-medium">{error}</span>
+            <button onClick={clearError} className="text-red-400 hover:text-red-300 font-bold ml-3 text-lg">×</button>
           </div>
         )}
 
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleSubmit} className="space-y-5">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Full Name</label>
+            <label className="block text-sm font-semibold text-slate-300 mb-2">Full Name</label>
             <input
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
               required
-              className="w-full border border-gray-300 rounded-lg px-4 py-2.5 focus:ring-2 focus:ring-blue-500 outline-none"
+              className="w-full bg-slate-900/50 border border-slate-700 rounded-xl px-5 py-3.5 focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 outline-none transition text-white placeholder-slate-500"
               placeholder="John Doe"
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+            <label className="block text-sm font-semibold text-slate-300 mb-2">Email Address</label>
             <input
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               required
-              className="w-full border border-gray-300 rounded-lg px-4 py-2.5 focus:ring-2 focus:ring-blue-500 outline-none"
-              placeholder="you@example.com"
+              className="w-full bg-slate-900/50 border border-slate-700 rounded-xl px-5 py-3.5 focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 outline-none transition text-white placeholder-slate-500"
+              placeholder="name@company.com"
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
+            <label className="block text-sm font-semibold text-slate-300 mb-2">Password</label>
             <input
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
               minLength={6}
-              className="w-full border border-gray-300 rounded-lg px-4 py-2.5 focus:ring-2 focus:ring-blue-500 outline-none"
-              placeholder="Min 6 characters"
+              className="w-full bg-slate-900/50 border border-slate-700 rounded-xl px-5 py-3.5 focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 outline-none transition text-white placeholder-slate-500"
+              placeholder="Minimum 6 characters"
             />
           </div>
           <button
             type="submit"
             disabled={loading}
-            className="w-full bg-blue-700 hover:bg-blue-800 disabled:bg-blue-400 text-white font-semibold py-2.5 rounded-lg transition"
+            className="w-full mt-4 bg-gradient-to-r from-cyan-500 to-indigo-500 hover:from-cyan-400 hover:to-indigo-400 disabled:opacity-50 text-white font-bold py-4 rounded-xl transition text-lg glow-cyan relative overflow-hidden group"
           >
-            {loading ? 'Creating account...' : 'Sign Up'}
+            <span className="relative z-10">{loading ? 'Creating Account...' : 'Sign Up →'}</span>
+            <div className="absolute inset-0 bg-white/20 translate-y-full group-hover:translate-y-0 transition-transform duration-300 ease-out" />
           </button>
         </form>
 
-        <p className="text-center text-gray-500 mt-6">
+        <p className="text-center text-slate-400 mt-8 font-medium">
           Already have an account?{' '}
-          <Link to="/login" className="text-blue-600 font-medium hover:underline">Login</Link>
+          <Link to="/login" className="text-cyan-400 hover:text-cyan-300 transition hover:underline decoration-cyan-400/30 underline-offset-4">Log In</Link>
         </p>
       </div>
     </div>
