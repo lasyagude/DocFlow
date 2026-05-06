@@ -9,7 +9,22 @@ const normalizeEmail = (value) => {
   return value.trim().toLowerCase();
 };
 
-const isValidEmail = (value) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+const isValidEmail = (value) => {
+  if (typeof value !== 'string') {
+    return false;
+  }
+
+  const email = value.trim();
+  const atIndex = email.indexOf('@');
+  const lastAtIndex = email.lastIndexOf('@');
+  const dotIndex = email.lastIndexOf('.');
+
+  return atIndex > 0
+    && atIndex === lastAtIndex
+    && dotIndex > atIndex + 1
+    && dotIndex < email.length - 1
+    && !email.includes(' ');
+};
 
 const isValidObjectId = (value) => mongoose.Types.ObjectId.isValid(String(value || ''));
 
@@ -45,7 +60,24 @@ const cleanDisplayName = (value) => {
   if (typeof value !== 'string') {
     return '';
   }
-  return value.trim().replace(/\s+/g, ' ').slice(0, 80);
+
+  let output = '';
+  let previousWasSpace = true;
+
+  for (const char of value.trim()) {
+    const isSpace = char === ' ' || char === '\t' || char === '\n' || char === '\r';
+    if (isSpace) {
+      if (!previousWasSpace) {
+        output += ' ';
+        previousWasSpace = true;
+      }
+    } else {
+      output += char;
+      previousWasSpace = false;
+    }
+  }
+
+  return output.slice(0, 80);
 };
 
 module.exports = {
