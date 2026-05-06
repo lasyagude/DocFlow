@@ -1,6 +1,7 @@
 const axios = require('axios');
 
-const LOCAL_AI_SERVICE_URL = 'http://localhost:5001';
+const LOCAL_AI_SERVICE_URL = process.env.LOCAL_AI_SERVICE_URL || 'http://localhost:5001';
+const AI_SERVICE_TOKEN = process.env.AI_SERVICE_TOKEN || null;
 const HF_FALLBACK_MODEL = process.env.HF_FALLBACK_MODEL || null;
 const HF_API_KEY = process.env.HF_API_KEY || null;
 const HF_FALLBACK_URL = HF_FALLBACK_MODEL
@@ -38,6 +39,11 @@ async function runFallbackInference(prompt) {
 }
 
 async function runInference(prompt) {
+  if (!AI_SERVICE_TOKEN) {
+    console.log('Local AI service token is not configured');
+    return runFallbackInference(prompt);
+  }
+
   try {
     console.log('Using local AI service');
     const res = await axios.post(
@@ -46,6 +52,7 @@ async function runInference(prompt) {
       {
         headers: {
           'Content-Type': 'application/json',
+          Authorization: `Bearer ${AI_SERVICE_TOKEN}`,
         },
         timeout: 120000,
       }

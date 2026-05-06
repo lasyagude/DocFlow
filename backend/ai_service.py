@@ -7,6 +7,7 @@ app = Flask(__name__)
 
 MODEL_NAME = os.environ.get('AI_MODEL_NAME', 'google/flan-t5-base')
 MAX_LENGTH = int(os.environ.get('AI_MAX_LENGTH', 200))
+AI_SERVICE_TOKEN = os.environ.get('AI_SERVICE_TOKEN')
 DEVICE = 0 if torch.cuda.is_available() else -1
 
 print(f'Loading model {MODEL_NAME} on device {DEVICE}...')
@@ -33,6 +34,14 @@ def generate_text(prompt: str) -> str:
 
 @app.route('/generate', methods=['POST'])
 def generate():
+    if not AI_SERVICE_TOKEN:
+        return jsonify({'error': 'AI service token is not configured'}), 503
+
+    auth_header = request.headers.get('Authorization', '').strip()
+    expected_header = f'Bearer {AI_SERVICE_TOKEN}'
+    if auth_header != expected_header:
+        return jsonify({'error': 'Unauthorized'}), 401
+
     payload = request.get_json(force=True)
     prompt = payload.get('prompt', '')
 
@@ -53,4 +62,5 @@ def health():
 
 if __name__ == '__main__':
     port = int(os.environ.get('AI_SERVICE_PORT', 5001))
-    app.run(host='0.0.0.0', port=port)
+    host = os.environ.get('AI_SERVICE_HOST', '127.0.0.1')
+    app.run(host=host, port=port)

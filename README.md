@@ -65,6 +65,8 @@ MONGODB_URI=your_mongodb_connection_string
 JWT_SECRET=your_jwt_secret
 SUPABASE_URL=your_supabase_url
 SUPABASE_ANON_KEY=your_supabase_anon_key
+LOCAL_AI_SERVICE_URL=http://localhost:5001
+AI_SERVICE_TOKEN=your_internal_ai_service_token
 HF_API_KEY=your_huggingface_api_key
 HF_FALLBACK_MODEL=your_huggingface_model
 FRONTEND_URL=http://localhost:3000
@@ -76,7 +78,7 @@ Optional local AI service:
 python ai_service.py
 ```
 
-The backend first tries the local AI service and then falls back to Hugging Face if needed.
+Set the same `AI_SERVICE_TOKEN` for the Node backend and the local Python service. The backend first tries the local AI service and then falls back to Hugging Face if needed.
 
 ## Frontend Setup
 
