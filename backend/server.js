@@ -21,7 +21,7 @@ if (!process.env.MONGODB_URI) {
   process.exit(1);
 }
 
-// CORS — allow local dev + deployed frontend
+// CORS: allow local dev + deployed frontend
 const allowedOrigins = [
   'http://localhost:3000',
   'http://localhost:5173',
