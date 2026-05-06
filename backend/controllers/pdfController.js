@@ -16,6 +16,20 @@ function sanitizeStorageName(value = '') {
     .replace(/_+/g, '_');
 }
 
+function safeUnlink(filePath) {
+  if (!filePath) return;
+  try {
+    if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+  } catch (error) {
+    console.error('[PDF] Failed to remove temp file:', error.message);
+  }
+}
+
+function isPdfUpload(file) {
+  return file?.mimetype === 'application/pdf'
+    && path.extname(file.originalname || '').toLowerCase() === '.pdf';
+}
+
 // Helper: fetch PDF buffer from URL
 async function fetchPdfBuffer(url) {
   const response = await axios.get(url, { responseType: 'arraybuffer', timeout: 30000 });
@@ -55,6 +69,10 @@ async function uploadResult(buffer, originalName, userId, operation) {
 exports.compress = async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ message: 'No file uploaded' });
+    if (!isPdfUpload(req.file)) {
+      safeUnlink(req.file.path);
+      return res.status(400).json({ message: 'Only PDF files are supported for this operation' });
+    }
 
     const inputBuffer = fs.readFileSync(req.file.path);
     const pdfDoc = await PDFDocument.load(inputBuffer, { ignoreEncryption: true });
@@ -76,7 +94,7 @@ exports.compress = async (req, res) => {
     const document = await uploadResult(compressedBuffer, req.file.originalname, req.userId, 'compress');
 
     // Clean up temp file
-    fs.unlinkSync(req.file.path);
+    safeUnlink(req.file.path);
 
     const savings = ((1 - compressedBuffer.length / inputBuffer.length) * 100).toFixed(1);
 
@@ -88,8 +106,8 @@ exports.compress = async (req, res) => {
       savings: `${savings}%`,
     });
   } catch (err) {
-    if (req.file?.path) fs.unlinkSync(req.file.path);
-    res.status(500).json({ message: 'Compression failed', error: err.message });
+    safeUnlink(req.file?.path);
+    res.status(500).json({ message: 'Compression failed' });
   }
 };
 
@@ -98,6 +116,10 @@ exports.merge = async (req, res) => {
   try {
     if (!req.files || req.files.length < 2) {
       return res.status(400).json({ message: 'Please upload at least 2 PDF files' });
+    }
+    if (!req.files.every(isPdfUpload)) {
+      req.files.forEach((file) => safeUnlink(file.path));
+      return res.status(400).json({ message: 'Only PDF files are supported for this operation' });
     }
 
     const mergedPdf = await PDFDocument.create();
@@ -114,7 +136,7 @@ exports.merge = async (req, res) => {
     const document = await uploadResult(mergedBuffer, 'merged.pdf', req.userId, 'merge');
 
     // Clean up temp files
-    req.files.forEach(f => fs.unlinkSync(f.path));
+    req.files.forEach((file) => safeUnlink(file.path));
 
     res.json({
       message: 'PDFs merged successfully',
@@ -123,8 +145,8 @@ exports.merge = async (req, res) => {
       filesCount: req.files.length,
     });
   } catch (err) {
-    if (req.files) req.files.forEach(f => { try { fs.unlinkSync(f.path); } catch {} });
-    res.status(500).json({ message: 'Merge failed', error: err.message });
+    if (req.files) req.files.forEach((file) => safeUnlink(file.path));
+    res.status(500).json({ message: 'Merge failed' });
   }
 };
 
@@ -132,6 +154,10 @@ exports.merge = async (req, res) => {
 exports.split = async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ message: 'No file uploaded' });
+    if (!isPdfUpload(req.file)) {
+      safeUnlink(req.file.path);
+      return res.status(400).json({ message: 'Only PDF files are supported for this operation' });
+    }
 
     const { startPage = 1, endPage } = req.body;
     const inputBuffer = fs.readFileSync(req.file.path);
@@ -142,7 +168,7 @@ exports.split = async (req, res) => {
     const end = Math.min(totalPages, parseInt(endPage || totalPages)) - 1;
 
     if (start > end || start >= totalPages) {
-      fs.unlinkSync(req.file.path);
+      safeUnlink(req.file.path);
       return res.status(400).json({ message: `Invalid page range. PDF has ${totalPages} pages.` });
     }
 
@@ -157,7 +183,7 @@ exports.split = async (req, res) => {
     const splitBuffer = Buffer.from(splitBytes);
     const document = await uploadResult(splitBuffer, req.file.originalname, req.userId, 'split');
 
-    fs.unlinkSync(req.file.path);
+    safeUnlink(req.file.path);
 
     res.json({
       message: 'PDF split successfully',
@@ -167,7 +193,7 @@ exports.split = async (req, res) => {
       range: `${start + 1}-${end + 1}`,
     });
   } catch (err) {
-    if (req.file?.path) try { fs.unlinkSync(req.file.path); } catch {}
-    res.status(500).json({ message: 'Split failed', error: err.message });
+    safeUnlink(req.file?.path);
+    res.status(500).json({ message: 'Split failed' });
   }
 };

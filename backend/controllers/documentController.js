@@ -9,6 +9,22 @@ const {
   isSupportedDocumentType,
   normalizeText,
 } = require('../services/documentAiService');
+const { isValidObjectId } = require('../utils/validation');
+
+const SAFE_DOCUMENT_FIELDS = [
+  'originalName',
+  'filename',
+  'fileType',
+  'mimeType',
+  'size',
+  'url',
+  'operation',
+  'aiFeatures',
+  'textExtraction',
+  'latestSummary',
+  'createdAt',
+  'expiresAt',
+].join(' ');
 
 function sanitizeStorageName(value = '') {
   return String(value || 'file')
@@ -91,7 +107,8 @@ exports.uploadDocument = async (req, res) => {
 
     if (error) {
       safeUnlink(file.path);
-      return res.status(500).json({ message: 'Supabase upload failed', error: error.message });
+      console.error('[Upload] Supabase upload failed:', error.message);
+      return res.status(502).json({ message: 'File storage failed' });
     }
 
     // Get public URL
@@ -127,42 +144,59 @@ exports.uploadDocument = async (req, res) => {
       details: { documentId: document._id, fileName: file.originalname }
     }).save();
 
+    const safeDocument = document.toObject();
+    delete safeDocument.processedText;
+    delete safeDocument.textChunks;
+    delete safeDocument.chatHistory;
+    delete safeDocument.storagePath;
+
     res.status(201).json({
       success: true,
       message: 'File uploaded successfully',
       fileType: documentType,
-      data: document,
+      data: safeDocument,
     });
   } catch (error) {
     safeUnlink(req.file?.path);
-    res.status(500).json({ success: false, message: 'Server error', error: error.message });
+    res.status(500).json({ success: false, message: 'Server error' });
   }
 };
 
 // Get all documents for user
 exports.getDocuments = async (req, res) => {
   try {
-    const documents = await Document.find({ userId: req.userId }).sort({ createdAt: -1 });
+    const documents = await Document.find({ userId: req.userId })
+      .select(SAFE_DOCUMENT_FIELDS)
+      .sort({ createdAt: -1 });
     res.status(200).json({ success: true, data: documents });
   } catch (error) {
-    res.status(500).json({ success: false, message: 'Server error', error: error.message });
+    res.status(500).json({ success: false, message: 'Server error' });
   }
 };
 
 // Get single document
 exports.getDocumentById = async (req, res) => {
   try {
-    const document = await Document.findOne({ _id: req.params.id, userId: req.userId });
+    if (!isValidObjectId(req.params.id)) {
+      return res.status(400).json({ success: false, message: 'Invalid document id' });
+    }
+
+    const document = await Document.findOne({ _id: req.params.id, userId: req.userId })
+      .select(SAFE_DOCUMENT_FIELDS);
     if (!document) return res.status(404).json({ success: false, message: 'Document not found' });
     res.status(200).json({ success: true, data: document });
   } catch (error) {
-    res.status(500).json({ success: false, message: 'Server error', error: error.message });
+    res.status(500).json({ success: false, message: 'Server error' });
   }
 };
 
 // ✅ FIX: Delete from Supabase storage too, not just MongoDB
 exports.deleteDocument = async (req, res) => {
   try {
+    if (!isValidObjectId(req.params.id)) {
+      return res.status(400).json({ success: false, message: 'Invalid document id' });
+    }
+
     const document = await Document.findOne({
       _id: req.params.id,
       userId: req.userId,
@@ -192,14 +226,14 @@ exports.deleteDocument = async (req, res) => {
 
     res.status(200).json({ success: true, message: 'Document deleted successfully' });
   } catch (error) {
-    res.status(500).json({ success: false, message: 'Server error', error: error.message });
+    res.status(500).json({ success: false, message: 'Server error' });
   }
 };
 
 exports.searchDocuments = async (req, res) => {
   try {
-    const query = normalizeText(req.body.query || '');
-    if (!query) {
+    const query = normalizeText(req.body.query || '').slice(0, 200);
+    if (!query || query.length < 2) {
       return res.status(400).json({ success: false, message: 'Search query is required.' });
     }
 
@@ -248,6 +282,6 @@ exports.searchDocuments = async (req, res) => {
 
     return res.json({ success: true, data: matches });
   } catch (error) {
-    return res.status(500).json({ success: false, message: 'Server error', error: error.message });
+    return res.status(500).json({ success: false, message: 'Server error' });
   }
 };

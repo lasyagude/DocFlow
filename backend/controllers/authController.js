@@ -1,15 +1,35 @@
 const User = require('../models/User');
 const ActivityLog = require('../models/ActivityLog');
 const jwt = require('jsonwebtoken');
+const {
+  cleanDisplayName,
+  isNonEmptyString,
+  isValidEmail,
+  normalizeEmail,
+} = require('../utils/validation');
 
 const generateToken = (userId, role) => {
-  return jwt.sign({ userId, role }, process.env.JWT_SECRET, { expiresIn: '7d' });
+  return jwt.sign({ userId, role }, process.env.JWT_SECRET, {
+    expiresIn: process.env.JWT_EXPIRES_IN || '2h',
+    issuer: 'docflow-api',
+    audience: 'docflow-client',
+  });
 };
 
 // Register
 exports.register = async (req, res) => {
   try {
-    const { name, email, password } = req.body;
+    const name = cleanDisplayName(req.body?.name);
+    const email = normalizeEmail(req.body?.email);
+    const password = req.body?.password;
+
+    if (!name || !isValidEmail(email) || !isNonEmptyString(password) || password.length < 8) {
+      return res.status(400).json({
+        success: false,
+        message: 'Name, valid email, and password of at least 8 characters are required.',
+      });
+    }
+
     const existingUser = await User.findOne({ email });
     if (existingUser) return res.status(400).json({ message: 'User already exists' });
 
@@ -31,16 +51,26 @@ exports.register = async (req, res) => {
       data: { id: user._id, name: user.name, email: user.email, role: user.role }
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: 'Server error', error: error.message });
+    if (error?.code === 11000) {
+      return res.status(400).json({ success: false, message: 'User already exists' });
+    }
+    res.status(500).json({ success: false, message: 'Server error' });
   }
 };
 
 // Login
 exports.login = async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const email = normalizeEmail(req.body?.email);
+    const password = req.body?.password;
+
+    if (!isValidEmail(email) || !isNonEmptyString(password)) {
+      return res.status(400).json({ message: 'Invalid credentials' });
+    }
+
     const user = await User.findOne({ email });
     if (!user) return res.status(400).json({ message: 'Invalid credentials' });
+    if (!user.isActive) return res.status(403).json({ message: 'Account is disabled' });
 
     const isMatch = await user.comparePassword(password);
     if (!isMatch) return res.status(400).json({ message: 'Invalid credentials' });
@@ -63,7 +93,7 @@ exports.login = async (req, res) => {
       data: { id: user._id, name: user.name, email: user.email, role: user.role }
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: 'Server error', error: error.message });
+    res.status(500).json({ success: false, message: 'Server error' });
   }
 };
 
@@ -71,8 +101,9 @@ exports.login = async (req, res) => {
 exports.getMe = async (req, res) => {
   try {
     const user = await User.findById(req.userId).select('-password');
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
     res.status(200).json({ success: true, data: user });
   } catch (error) {
-    res.status(500).json({ success: false, message: 'Server error', error: error.message });
+    res.status(500).json({ success: false, message: 'Server error' });
   }
 };

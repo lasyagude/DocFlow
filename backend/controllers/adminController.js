@@ -4,6 +4,7 @@ const Document = require('../models/Document');
 const AdminQueryLog = require('../models/AdminQueryLog');
 const { createClient } = require('@supabase/supabase-js');
 const { getAiSettings, setAiSettings } = require('../services/configService');
+const { isValidObjectId } = require('../utils/validation');
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -91,7 +92,7 @@ exports.getStats = async (req, res) => {
       }
     });
   } catch (err) {
-    res.status(500).json({ success: false, message: 'Server error', error: err.message });
+    res.status(500).json({ success: false, message: 'Server error' });
   }
 };
 
@@ -100,46 +101,62 @@ exports.getUsers = async (req, res) => {
     const users = await User.find({ role: 'user' }).select('-password').sort({ createdAt: -1 });
     res.json({ success: true, data: users });
   } catch (err) {
-    res.status(500).json({ success: false, message: 'Server error', error: err.message });
+    res.status(500).json({ success: false, message: 'Server error' });
   }
 };
 
 exports.toggleUser = async (req, res) => {
   try {
-    const user = await User.findById(req.params.id);
+    if (!isValidObjectId(req.params.id)) {
+      return res.status(400).json({ success: false, message: 'Invalid user id' });
+    }
+
+    const user = await User.findOne({ _id: req.params.id, role: 'user' });
     if (!user) return res.status(404).json({ success: false, message: 'User not found' });
     user.isActive = !user.isActive;
     await user.save();
-    res.json({ success: true, message: `User ${user.isActive ? 'activated' : 'deactivated'}`, data: user });
+    const safeUser = user.toObject();
+    delete safeUser.password;
+    res.json({ success: true, message: `User ${user.isActive ? 'activated' : 'deactivated'}`, data: safeUser });
   } catch (err) {
-    res.status(500).json({ success: false, message: 'Server error', error: err.message });
+    res.status(500).json({ success: false, message: 'Server error' });
   }
 };
 
 exports.deleteUser = async (req, res) => {
   try {
-    await User.findByIdAndDelete(req.params.id);
+    if (!isValidObjectId(req.params.id)) {
+      return res.status(400).json({ success: false, message: 'Invalid user id' });
+    }
+
+    const user = await User.findOneAndDelete({ _id: req.params.id, role: 'user' });
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
     await Document.deleteMany({ userId: req.params.id });
     res.json({ success: true, message: 'User deleted successfully' });
   } catch (err) {
-    res.status(500).json({ success: false, message: 'Server error', error: err.message });
+    res.status(500).json({ success: false, message: 'Server error' });
   }
 };
 
 exports.getAllDocuments = async (req, res) => {
   try {
     const documents = await Document.find()
+      .select('userId originalName filename fileType mimeType size url operation textExtraction createdAt expiresAt')
       .populate('userId', 'name email')
       .sort({ createdAt: -1 });
     res.json({ success: true, data: documents });
   } catch (err) {
-    res.status(500).json({ success: false, message: 'Server error', error: err.message });
+    res.status(500).json({ success: false, message: 'Server error' });
   }
 };
 
 // Admin delete any document
 exports.adminDeleteDocument = async (req, res) => {
   try {
+    if (!isValidObjectId(req.params.id)) {
+      return res.status(400).json({ success: false, message: 'Invalid document id' });
+    }
+
     const document = await Document.findById(req.params.id);
     if (!document) return res.status(404).json({ success: false, message: 'Document not found' });
 
@@ -154,15 +171,15 @@ exports.adminDeleteDocument = async (req, res) => {
     await document.deleteOne();
     res.json({ success: true, message: 'Document deleted successfully' });
   } catch (err) {
-    res.status(500).json({ success: false, message: 'Server error', error: err.message });
+    res.status(500).json({ success: false, message: 'Server error' });
   }
 };
 
 exports.handleAdminAiQuery = async (req, res) => {
   try {
-    console.log('Incoming query:', req.body);
-
-    const query = req.body?.query?.toLowerCase().trim() || '';
+    const query = typeof req.body?.query === 'string'
+      ? req.body.query.toLowerCase().trim().slice(0, 200)
+      : '';
 
     if (!query) {
       return res.status(400).json({ answer: 'Query is required' });
@@ -262,7 +279,6 @@ exports.getAdminMetricsSummary = async (req, res) => {
   } catch (err) {
     return res.status(500).json({
       message: 'Failed to fetch admin metrics summary.',
-      error: err.message,
     });
   }
 };
@@ -278,7 +294,6 @@ exports.getAiFeatureToggle = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: 'Failed to fetch AI feature toggle settings.',
-      error: err.message,
     });
   }
 };
@@ -299,7 +314,6 @@ exports.updateAiFeatureToggle = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: 'Failed to update AI feature toggle settings.',
-      error: err.message,
     });
   }
 };

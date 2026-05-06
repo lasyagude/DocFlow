@@ -28,7 +28,7 @@ router.get('/documents', auth, adminOnly, getAllDocuments);
 router.delete('/documents/:id', auth, adminOnly, adminDeleteDocument);
 router.get('/ai-settings', auth, adminOnly, getAiFeatureToggle);
 router.patch('/ai-settings', auth, adminOnly, updateAiFeatureToggle);
-router.post('/query', handleAdminAiQuery);
+router.post('/query', auth, adminOnly, handleAdminAiQuery);
 router.post('/ai-query', auth, adminOnly, handleAdminAiQuery);
 
 module.exports = router;

@@ -14,6 +14,7 @@ const {
   expandQuery,
   scoreChunk,
 } = require('../services/documentAiService');
+const { isValidObjectId } = require('../utils/validation');
 
 const ANSWER_NOT_FOUND_MESSAGE = 'Not found in document';
 const FALLBACK_STOPWORDS = new Set([
@@ -127,13 +128,25 @@ async function getDocumentForUser(req) {
     return null;
   }
 
+  if (!isValidObjectId(documentId)) {
+    return null;
+  }
+
   return Document.findOne({ _id: documentId, userId: req.userId });
 }
 
 async function downloadDocumentBuffer(doc) {
+  const sourceUrl = new URL(doc.url);
+  const configuredSupabaseUrl = process.env.SUPABASE_URL ? new URL(process.env.SUPABASE_URL) : null;
+
+  if (configuredSupabaseUrl && sourceUrl.hostname !== configuredSupabaseUrl.hostname) {
+    throw new Error('Document storage host is not allowed');
+  }
+
   const response = await axios.get(doc.url, {
     responseType: 'arraybuffer',
     timeout: 120000,
+    maxRedirects: 0,
   });
 
   return {
@@ -183,7 +196,7 @@ function cleanAiOutput(value) {
   return normalizeText(value || '')
     .replace(/[ \t]+\n/g, '\n')
     .replace(/\n{3,}/g, '\n\n')
-    .replace(/[•·?]\s*/g, '• ')
+    .replace(/[â€¢Â·]/g, '-')
     .replace(/\s{2,}/g, ' ')
     .trim();
 }
@@ -264,20 +277,20 @@ function buildSummaryFallback(chunks) {
     return 'No meaningful text found in document';
   }
 
-  return cleanAiOutput(summarySentences.map((sentence) => `• ${sentence}`).join('\n'));
+  return cleanAiOutput(summarySentences.map((sentence) => `â€¢ ${sentence}`).join('\n'));
 }
 
 function parseStructuredSummary(responseText) {
   const cleaned = cleanAiOutput(responseText);
   const lines = cleaned.split('\n').map((line) => line.trim()).filter(Boolean);
 
-  const bulletLines = lines.filter((line) => /^[-*•]/.test(line));
+  const bulletLines = lines.filter((line) => /^[-*â€¢]/.test(line));
   const keyPoints = bulletLines
-    .map((line) => `• ${line.replace(/^[-*•]\s*/, '').trim()}`)
+    .map((line) => `â€¢ ${line.replace(/^[-*â€¢]\s*/, '').trim()}`)
     .join('\n')
     .trim();
 
-  const summaryLines = lines.filter((line) => !/^[-*•]/.test(line));
+  const summaryLines = lines.filter((line) => !/^[-*â€¢]/.test(line));
   const shortSummary = cleanAiOutput(summaryLines.join('\n')).trim();
 
   return {
@@ -367,7 +380,7 @@ async function generateSummaryRAG(documentId, chunks) {
 Based ONLY on the provided context:
 
 1. List key points (bullet format)
-2. Write a short 3–4 line summary
+2. Write a short 3â€“4 line summary
 
 Rules:
 - Focus only on important information
@@ -502,9 +515,6 @@ function buildChatFallback(chunks, question) {
       .split(' ')
       .filter((word) => word.length > 2 && !FALLBACK_STOPWORDS.has(word))
   );
-
-  console.log('Question words:', questionWords);
-
   const scoredChunks = chunks
     .map((chunk, index) => ({
       chunk,
@@ -514,8 +524,6 @@ function buildChatFallback(chunks, question) {
     .sort((a, b) => b.score - a.score);
 
   const bestScore = scoredChunks[0]?.score || 0;
-  console.log('Best score:', bestScore);
-
   if (bestScore === 0) {
     const bestChunk = cleanForOutput(scoredChunks[0]?.chunk || chunks[0] || '');
     return {
@@ -577,7 +585,7 @@ function buildChatFallback(chunks, question) {
   }
 
   return {
-    text: cleanAiOutput(`Answer:\n${answerLine}\n\nContext:\n${supportingLines.map((line) => `• ${line}`).join('\n')}`),
+    text: cleanAiOutput(`Answer:\n${answerLine}\n\nContext:\n${supportingLines.map((line) => `â€¢ ${line}`).join('\n')}`),
     chunkIndex: scoredChunks[0]?.index ?? null,
   };
 }
@@ -607,7 +615,6 @@ async function answerDocumentQuestion(chunks, question) {
   }
 
   try {
-    console.log('Using AI');
     const context = relevantChunks.join('\n\n');
     const answer = await runPrompt(
       `Answer the question ONLY using the text below.\nIf the answer is not clearly present, say "Not found in document".\nUse clean wording and no extra filler.\n\nText:\n${context}\n\nQuestion:\n${question}\n`
@@ -630,7 +637,6 @@ async function answerDocumentQuestion(chunks, question) {
     };
   } catch (error) {
     console.error('[Chat AI Fallback]:', error.message);
-    console.log('Using fallback');
     const fallback = buildChatFallback(chunks, question);
     return {
       text: fallback.text,
@@ -652,7 +658,6 @@ exports.getLogs = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: 'Failed to fetch AI logs.',
-      error: error.message,
     });
   }
 };
@@ -666,11 +671,6 @@ exports.summarize = async (req, res) => {
 
     const { text } = await processDocument(doc);
     const normalizedText = normalizeText(text);
-
-    console.log('OCR TEXT:', text);
-    console.log('NORMALIZED TEXT:', normalizedText);
-    console.log('IS MEANINGFUL:', isMeaningfulText(normalizedText));
-
     if (!normalizedText || !isMeaningfulText(normalizedText)) {
       return res.json({
         success: true,
@@ -722,7 +722,7 @@ exports.chat = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Document not found.' });
     }
 
-    const question = normalizeText(req.body.question || req.body.message || '');
+    const question = normalizeText(req.body.question || req.body.message || '').slice(0, 1000);
     if (!question) {
       return res.status(400).json({ success: false, message: 'A question is required.' });
     }
@@ -796,7 +796,6 @@ exports.downloadSummary = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: 'Failed to download summary.',
-      error: error.message,
     });
   }
 };
