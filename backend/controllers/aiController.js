@@ -14,7 +14,7 @@ const {
   expandQuery,
   scoreChunk,
 } = require('../services/documentAiService');
-const { isValidObjectId } = require('../utils/validation');
+const { isValidObjectId, sanitizeFileName } = require('../utils/validation');
 
 const ANSWER_NOT_FOUND_MESSAGE = 'Not found in document';
 const FALLBACK_STOPWORDS = new Set([
@@ -785,9 +785,12 @@ exports.downloadSummary = async (req, res) => {
       });
     }
 
-    const baseName = (doc.originalName || doc.filename || 'document')
-      .replace(/\.[^.]+$/, '')
-      .replace(/[^\w.-]+/g, '_');
+    const originalName = doc.originalName || doc.filename || 'document';
+    const extensionIndex = originalName.lastIndexOf('.');
+    const nameWithoutExtension = extensionIndex > 0
+      ? originalName.slice(0, extensionIndex)
+      : originalName;
+    const baseName = sanitizeFileName(nameWithoutExtension, 'document');
 
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="${baseName}_summary.txt"`);

@@ -9,7 +9,7 @@ const {
   isSupportedDocumentType,
   normalizeText,
 } = require('../services/documentAiService');
-const { isValidObjectId } = require('../utils/validation');
+const { isValidObjectId, sanitizeFileName } = require('../utils/validation');
 
 const SAFE_DOCUMENT_FIELDS = [
   'originalName',
@@ -27,9 +27,7 @@ const SAFE_DOCUMENT_FIELDS = [
 ].join(' ');
 
 function sanitizeStorageName(value = '') {
-  return String(value || 'file')
-    .replace(/[^\w.-]+/g, '_')
-    .replace(/_+/g, '_');
+  return sanitizeFileName(value, 'file');
 }
 
 function safeUnlink(filePath) {

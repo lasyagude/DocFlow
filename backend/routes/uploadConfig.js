@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const multer = require('multer');
+const { sanitizeFileName } = require('../utils/validation');
 
 const uploadDir = path.join(__dirname, '..', 'uploads');
 fs.mkdirSync(uploadDir, { recursive: true });
@@ -21,9 +22,7 @@ const storage = multer.diskStorage({
   destination: (_req, _file, cb) => cb(null, uploadDir),
   filename: (_req, file, cb) => {
     const ext = path.extname(file.originalname || '').toLowerCase();
-    const baseName = path.basename(file.originalname || 'upload', ext)
-      .replace(/[^\w.-]+/g, '_')
-      .replace(/_+/g, '_')
+    const baseName = sanitizeFileName(path.basename(file.originalname || 'upload', ext), 'upload')
       .slice(0, 80) || 'upload';
     cb(null, `${Date.now()}_${baseName}${ext}`);
   },

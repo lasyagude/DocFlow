@@ -4,6 +4,7 @@ const { createClient } = require('@supabase/supabase-js');
 const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
+const { sanitizeFileName } = require('../utils/validation');
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -11,9 +12,7 @@ const supabase = createClient(
 );
 
 function sanitizeStorageName(value = '') {
-  return String(value || 'file.pdf')
-    .replace(/[^\w.-]+/g, '_')
-    .replace(/_+/g, '_');
+  return sanitizeFileName(value, 'file.pdf');
 }
 
 function safeUnlink(filePath) {
